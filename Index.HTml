@@ -488,7 +488,208 @@ function goHome(){
 </</body>
 </html>
 
-</script>
+</   <style>
+.mina-dashboard {
+  background: #edf4ff;
+  padding: 20px;
+  margin: 20px 0;
+  border-radius: 15px;
+  color: #17345c;
+}
+
+.mina-dashboard h2 {
+  text-align: center;
+  color: #174ea6;
+}
+
+.mina-dashboard select {
+  width: 100%;
+  padding: 12px;
+  margin: 8px 0;
+  border-radius: 8px;
+}
+
+.mina-topic {
+  background: white;
+  padding: 12px;
+  border-radius: 9px;
+  margin: 8px 0;
+}
+
+.mina-dashboard button {
+  background: #174ea6;
+  color: white;
+  border: none;
+  padding: 10px 14px;
+  border-radius: 8px;
+}
+</style>
+
+<section class="mina-dashboard">
+  <h2>📚 MINA TEACH LEARNING DASHBOARD</h2>
+
+  <label>Select Grade</label>
+  <select id="minaDashGrade">
+    <option>Grade 9</option>
+    <option>Grade 10</option>
+    <option>Grade 11</option>
+    <option>Grade 12</option>
+  </select>
+
+  <label>Select Subject</label>
+  <select id="minaDashSubject">
+    <option>English</option>
+    <option>Mathematics</option>
+    <option>Biology</option>
+    <option>Chemistry</option>
+    <option>Physics</option>
+    <option>General Knowledge</option>
+    <option>Aptitude</option>
+    <option>Afaan Oromoo</option>
+    <option>History</option>
+    <option>Geography</option>
+    <option>Social Studies</option>
+    <option>Civics and Ethics</option>
+    <option>Economics</option>
+    <option>ICT</option>
+    <option>Environmental Science</option>
+  </select>
+
+  <h3>📖 Learning Topics</h3>
+
+  <div id="minaDashTopics"></div>
+
+  <p id="minaDashProgress">Completed: 0 / 5</p>
+</section>
+
+<script>
+const minaDashTopicData = {
+  "English": [
+    "Grammar",
+    "Vocabulary",
+    "Reading",
+    "Writing",
+    "Communication"
+  ],
+  "Mathematics": [
+    "Algebra",
+    "Geometry",
+    "Trigonometry",
+    "Statistics",
+    "Probability"
+  ],
+  "Biology": [
+    "Cells",
+    "Genetics",
+    "Ecology",
+    "Evolution",
+    "Human Biology"
+  ],
+  "Chemistry": [
+    "Atoms",
+    "Chemical Bonding",
+    "Acids and Bases",
+    "Reactions",
+    "Organic Chemistry"
+  ],
+  "Physics": [
+    "Motion",
+    "Force",
+    "Energy",
+    "Electricity",
+    "Waves"
+  ]
+};
+
+const minaDashStorageKey = "minaDashCompleted";
+let minaDashCompleted = {};
+
+try {
+  minaDashCompleted = JSON.parse(
+    localStorage.getItem(minaDashStorageKey) || "{}"
+  );
+} catch (error) {
+  minaDashCompleted = {};
+}
+
+function minaDashRender() {
+  const subject = document.getElementById(
+    "minaDashSubject"
+  ).value;
+
+  const grade = document.getElementById(
+    "minaDashGrade"
+  ).value;
+
+  const topics = minaDashTopicData[subject] || [
+    "Introduction",
+    "Basic Concepts",
+    "Important Terms",
+    "Practice",
+    "Revision"
+  ];
+
+  const key = grade + "_" + subject;
+
+  if (!Array.isArray(minaDashCompleted[key])) {
+    minaDashCompleted[key] = [];
+  }
+
+  const area = document.getElementById("minaDashTopics");
+  area.innerHTML = "";
+
+  topics.forEach((topic, index) => {
+    const card = document.createElement("div");
+    card.className = "mina-topic";
+
+    const label = document.createElement("label");
+    const checkbox = document.createElement("input");
+
+    checkbox.type = "checkbox";
+    checkbox.checked =
+      minaDashCompleted[key].includes(index);
+
+    checkbox.onchange = function() {
+      if (this.checked) {
+        if (!minaDashCompleted[key].includes(index)) {
+          minaDashCompleted[key].push(index);
+        }
+      } else {
+        minaDashCompleted[key] =
+          minaDashCompleted[key].filter(i => i !== index);
+      }
+
+      localStorage.setItem(
+        minaDashStorageKey,
+        JSON.stringify(minaDashCompleted)
+      );
+
+      minaDashUpdateProgress(topics.length, key);
+    };
+
+    label.append(checkbox, document.createTextNode(" " + topic));
+    card.appendChild(label);
+    area.appendChild(card);
+  });
+
+  minaDashUpdateProgress(topics.length, key);
+}
+
+function minaDashUpdateProgress(total, key) {
+  const completed = minaDashCompleted[key] || [];
+
+  document.getElementById("minaDashProgress").textContent =
+    "Completed: " + completed.length + " / " + total;
+}
+
+document.getElementById("minaDashGrade")
+  .addEventListener("change", minaDashRender);
+
+document.getElementById("minaDashSubject")
+  .addEventListener("change", minaDashRender);
+
+minaDashRender();
+</script>   >
 
 </body>
 </html>
