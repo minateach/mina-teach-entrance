@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mina Teach Entrance</title>
+
+<style>
+*{box-sizing:border-box}
+body{
+  margin:0;
+  font-family:Arial,sans-serif;
+  background:#f1f5f9;
+  color:#172554;
+}
+header{
+  background:#123c69;
+  color:white;
+  text-align:center;
+  padding:25px 10px;
+}
+header h1{margin:0}
+.container{
+  max-width:700px;
+  margin:20px auto;
+  padding:15px;
+}
+.card{
+  background:white;
+  padding:20px;
+  margin-bottom:15px;
+  border-radius:12px;
+  box-shadow:0 2px 8px #0001;
+}
+h2{text-align:center}
+button,select{
+  width:100%;
+  padding:13px;
+  margin:7px 0;
+  border:0;
+  border-radius:8px;
+  font-size:16px;
+}
+button{
+  background:#123c69;
+  color:white;
+  cursor:pointer;
+}
+button:hover{background:#1d5b96}
+.option{
+  background:#e2e8f0;
+  color:#172554;
+  text-align:left;
+}
+.option:disabled{opacity:.8}
+.hidden{display:none}
+#timer{color:#dc2626;font-weight:bold}
+footer{text-align:center;padding:20px;color:#64748b}
+</style>
+</head>
+
+<body>
+
+<header>
+<h1>MINA TEACH</h1>
+<p>Entrance Exam Preparation</p>
+</header>
+
+<div class="container">
+
+<div class="card" id="languagePage">
+<h2>Choose Your Language</h2>
+<select id="language">
+<option value="en">English</option>
+<option value="om">Afaan Oromoo</option>
+<option value="am">Amharic</option>
+<option value="ar">Arabic</option>
+</select>
+<button onclick="chooseLanguage()">Continue</button>
+</div>
+
+<div class="card hidden" id="gradePage">
+<h2 id="gradeTitle">Choose Your Grade</h2>
+<button onclick="chooseGrade(9)">Grade 9</button>
+<button onclick="chooseGrade(10)">Grade 10</button>
+<button onclick="chooseGrade(11)">Grade 11</button>
+<button onclick="chooseGrade(12)">Grade 12</button>
+</div>
+
+<div class="card hidden" id="subjectPage">
+<h2 id="subjectTitle">Choose Subject</h2>
+<div id="subjects"></div>
+</div>
+
+<div class="card hidden" id="topicPage">
+<h2>Mathematics Topics</h2>
+<div id="topics"></div>
+</div>
+
+<div class="card hidden" id="quizPage">
+<h2 id="quizTitle">Mina Teach Quiz</h2>
+<p>Grade: <span id="gradeDisplay"></span></p>
+<p>Subject: <span id="subjectDisplay"></span></p>
+<p>Question: <span id="questionNumber"></span></p>
+<p>Time: <span id="timer">60</span> seconds</p>
+<h3 id="question"></h3>
+<div id="options"></div>
+<p id="feedback"></p>
+<p id="explanation"></p>
+<button id="nextButton" class="hidden" onclick="nextQuestion()">Next Question</button>
+</div>
+
+<div class="card hidden" id="resultPage">
+<h2>Quiz Completed!</h2>
+<h3 id="resultScore"></h3>
+<p id="resultMessage"></p>
+<button onclick="retryQuiz()">Try Again</button>
+<button onclick="goHome()">Choose Another Subject</button>
+</div>
+
+</div>
+
+<footer>
+MINA TEACH | Learn Today, Build Tomorrow
+</footer>
+
+<script>
+let language="en";
+let grade=9;
+let subject="";
+let topic="";
+let index=0;
+let score=0;
+let time=60;
+let timerInterval;
+let answered=false;
+
+const translations={
+ en:{
+  grade:"Choose Your Grade",
+  subject:"Choose Subject",
+  correct:"Correct answer!",
+  wrong:"Incorrect answer.",
+  timeout:"Time is over!",
+  explanation:"Explanation",
+  score:"Your score",
+  passed:"Keep practicing. You can try again!",
+  next:"Next Question"
+ },
+ om:{
+  grade:"Kutaa Barnootaa Filadhu",
+  subject:"Barnoota Filadhu",
+  correct:"Deebiin sirrii dha!",
+  wrong:"Deebiin sirrii miti.",
+  timeout:"Yeroon xumurame!",
+  explanation:"Ibsa",
+  score:"Qabxii kee",
+  passed:"Shaakali itti fufi. Irra deebi'uu dandeessa!",
+  next:"Gaaffii Itti Aanu"
+ },
+ am:{
+  grade:"ክፍል ይምረጡ",
+  subject:"ትምህርት ይምረጡ",
+  correct:"ትክክለኛ መልስ!",
+  wrong:"ትክክለኛ መልስ አይደለም።",
+  timeout:"ጊዜው አልቋል!",
+  explanation:"ማብራሪያ",
+  score:"ውጤትህ",
+  passed:"መለማመድህን ቀጥል!",
+  next:"ቀጣይ ጥያቄ"
+ },
+ ar:{
+  grade:"اختر الصف",
+  subject:"اختر المادة",
+  correct:"إجابة صحيحة!",
+  wrong:"إجابة غير صحيحة.",
+  timeout:"انتهى الوقت!",
+  explanation:"الشرح",
+  score:"نتيجتك",
+  passed:"استمر في التدريب!",
+  next:"السؤال التالي"
+ }
+};
+
+const subjects=[
+"English","Mathematics","Biology","Chemistry","Physics",
+"General Knowledge","Aptitude","Afaan Oromoo","History",
+"Geography","Social Studies","Civics and Ethics",
+"Economics","ICT","Environmental Science"
+];
+
+const mathTopics=[
+"Algebra","Geometry","Trigonometry","Statistics",
+"Probability","Functions","Sequences and Series",
+"Calculus","Sets and Logic","Number Systems"
+];
+
+const questions={
+ "English":[
+  {
+   q:"Choose the correct sentence.",
+   o:["She go to school.","She goes to school.","She going school.","She gone school."],
+   a:1,
+   e:"With he, she, or it, we normally add -s to the present simple verb."
+  },
+  {
+   q:"What is the opposite of 'ancient'?",
+   o:["Old","Modern","Historic","Past"],
+   a:1,
+   e:"Modern means relating to the present time."
+  }
+ ],
+ "Mathematics":[
+  {
+   q:"Solve: 2x + 6 = 16. What is x?",
+   o:["3","4","5","6"],
+   a:2,
+   e:"Subtract 6 from both sides, then divide by 2. x = 5."
+  },
+  {
+   q:"What is the square root of 81?",
+   o:["7","8","9","10"],
+   a:2,
+   e:"9 × 9 = 81."
+  }
+ ],
+ "Biology":[
+  {
+   q:"Which organelle produces energy in a cell?",
+   o:["Nucleus","Mitochondrion","Ribosome","Vacuole"],
+   a:1,
+   e:"Mitochondria are important in producing ATP energy."
+  }
+ ],
+ "Chemistry":[
+  {
+   q:"What is the chemical symbol for water?",
+   o:["CO2","O2","H2O","NaCl"],
+   a:2,
+   e:"Water contains two hydrogen atoms and one oxygen atom."
+  }
+ ],
+ "Physics":[
+  {
+   q:"What is the SI unit of force?",
+   o:["Joule","Newton","Watt","Pascal"],
+   a:1,
+   e:"The SI unit of force is the Newton."
+  }
+ ],
+ "General Knowledge":[
+  {
+   q:"What is the largest planet in our solar system?",
+   o:["Earth","Mars","Jupiter","Venus"],
+   a:2,
+   e:"Jupiter is the largest planet in our solar system."
+  }
+ ],
+ "Aptitude":[
+  {
+   q:"Find the next number: 2, 4, 6, 8, __",
+   o:["9","10","12","14"],
+   a:1,
+   e:"Each number increases by 2."
+  }
+ ],
+ "Afaan Oromoo":[
+  {
+   q:"Which one is a noun?",
+   o:["Run","Beautiful","Teacher","Quickly"],
+   a:2,
+   e:"A teacher is a person, so it is a noun."
+  }
+ ],
+ "History":[
+  {
+   q:"Which ancient civilization built the pyramids of Giza?",
+   o:["Roman","Egyptian","Greek","Persian"],
+   a:1,
+   e:"The pyramids of Giza were built in ancient Egypt."
+  }
+ ],
+ "Geography":[
+  {
+   q:"Which is the largest continent?",
+   o:["Africa","Europe","Asia","Australia"],
+   a:2,
+   e:"Asia is the largest continent by land area."
+  }
+ ],
+ "Social Studies":[
+  {
+   q:"What is a community?",
+   o:["A group of people living together","One building","A river","A mountain"],
+   a:0,
+   e:"A community is a group of people who share a place or common interests."
+  }
+ ],
+ "Civics and Ethics":[
+  {
+   q:"What is a responsibility?",
+   o:["A duty","A holiday","A game","A gift"],
+   a:0,
+   e:"Responsibility means a duty or obligation."
+  }
+ ],
+ "Economics":[
+  {
+   q:"What is scarcity in economics?",
+   o:["Unlimited resources","Limited resources","Free goods only","No demand"],
+   a:1,
+   e:"Scarcity means resources are limited compared with people's wants."
+  }
+ ],
+ "ICT":[
+  {
+   q:"What does CPU stand for?",
+   o:["Central Processing Unit","Computer Personal Unit","Central Program Utility","Control Power Unit"],
+   a:0,
+   e:"CPU stands for Central Processing Unit."
+  }
+ ],
+ "Environmental Science":[
+  {
+   q:"Which action helps protect the environment?",
+   o:["Deforestation","Planting trees","Burning waste","Polluting rivers"],
+   a:1,
+   e:"Planting trees helps protect the environment."
+  }
+ ]
+};
+
+function show(id){
+ document.querySelectorAll(".container > .card").forEach(
+  card=>card.classList.add("hidden")
+ );
+ document.getElementById(id).classList.remove("hidden");
+}
+
+function chooseLanguage(){
+ language=document.getElementById("language").value;
+ document.getElementById("gradeTitle").innerText=translations[language].grade;
+ show("gradePage");
+}
+
+function chooseGrade(g){
+ grade=g;
+ document.getElementById("subjectTitle").innerText=translations[language].subject;
+ let box=document.getElementById("subjects");
+ box.innerHTML="";
+ subjects.forEach(s=>{
+  let b=document.createElement("button");
+  b.textContent=s;
+  b.onclick=()=>chooseSubject(s);
+  box.appendChild(b);
+ });
+ show("subjectPage");
+}
+
+function chooseSubject(s){
+ subject=s;
+ if(s==="Mathematics"){
+  let box=document.getElementById("topics");
+  box.innerHTML="";
+  mathTopics.forEach(t=>{
+   let b=document.createElement("button");
+   b.textContent=t;
+   b.onclick=()=>startQuiz(t);
+   box.appendChild(b);
+  });
+  show("topicPage");
+ }else{
+  startQuiz("");
+ }
+}
+
+function getQuestions(){
+ return questions[subject] || [];
+}
+
+function startQuiz(t){
+ topic=t;
+ index=0;
+ score=0;
+ show("quizPage");
+ document.getElementById("gradeDisplay").innerText=grade;
+ document.getElementById("subjectDisplay").innerText=subject;
+ loadQuestion();
+}
+
+function loadQuestion(){
+ clearInterval(timerInterval);
+ let data=getQuestions();
+
+ if(index>=data.length){
+  finishQuiz();
+  return;
+ }
+
+ answered=false;
+ time=60;
+ document.getElementById("timer").innerText=time;
+ document.getElementById("questionNumber").innerText=
+  (index+1)+" / "+data.length;
+
+ document.getElementById("question").innerText=data[index].q;
+ document.getElementById("feedback").innerText="";
+ document.getElementById("explanation").innerText="";
+ document.getElementById("nextButton").classList.add("hidden");
+
+ let box=document.getElementById("options");
+ box.innerHTML="";
+
+ data[index].o.forEach((option,i)=>{
+  let b=document.createElement("button");
+  b.className="option";
+  b.innerText=option;
+  b.onclick=()=>checkAnswer(i);
+  box.appendChild(b);
+ });
+
+ timerInterval=setInterval(()=>{
+  time--;
+  document.getElementById("timer").innerText=time;
+  if(time<=0){
+   clearInterval(timerInterval);
+   if(!answered){
+    answered=true;
+    document.getElementById("feedback").innerText=translations[language].timeout;
+    document.getElementById("explanation").innerText=
+     translations[language].explanation+": "+data[index].e;
+    disableOptions();
+    document.getElementById("nextButton").classList.remove("hidden");
+   }
+  }
+ },1000);
+}
+
+function disableOptions(){
+ document.querySelectorAll(".option").forEach(b=>b.disabled=true);
+}
+
+function checkAnswer(choice){
+ if(answered)return;
+ answered=true;
+ clearInterval(timerInterval);
+
+ let q=getQuestions()[index];
+
+ if(choice===q.a){
+  score++;
+  document.getElementById("feedback").innerText=translations[language].correct;
+ }else{
+  document.getElementById("feedback").innerText=translations[language].wrong;
+ }
+
+ document.getElementById("explanation").innerText=
+  translations[language].explanation+": "+q.e;
+
+ disableOptions();
+ document.getElementById("nextButton").classList.remove("hidden");
+ document.getElementById("nextButton").innerText=translations[language].next;
+}
+
+function nextQuestion(){
+ index++;
+ loadQuestion();
+}
+
+function finishQuiz(){
+ clearInterval(timerInterval);
+ show("resultPage");
+ let total=getQuestions().length;
+ document.getElementById("resultScore").innerText=
+  translations[language].score+": "+score+" / "+total;
+ document.getElementById("resultMessage").innerText=
+  translations[language].passed;
+}
+
+function retryQuiz(){
+ startQuiz(topic);
+}
+
+function goHome(){
+ clearInterval(timerInterval);
+ show("gradePage");
+}
+</script>
+
+</body>
+</html>
