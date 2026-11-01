@@ -1,0 +1,159 @@
+<style>
+.study-planner {
+  background: #eef4ff;
+  padding: 18px;
+  border-radius: 14px;
+  margin: 20px 0;
+  color: #17345c;
+}
+
+.study-planner h2 {
+  text-align: center;
+}
+
+.study-planner input {
+  width: 95%;
+  padding: 12px;
+  border: 1px solid #aaa;
+  border-radius: 8px;
+  margin-bottom: 10px;
+}
+
+.study-planner button {
+  background: #174ea6;
+  color: white;
+  border: none;
+  padding: 11px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.study-task {
+  background: white;
+  padding: 12px;
+  margin-top: 10px;
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.study-task.done span {
+  text-decoration: line-through;
+  color: gray;
+}
+</style>
+
+<section class="study-planner">
+  <h2>📚 Daily Study Planner</h2>
+
+  <p>Plan your daily learning activities.</p>
+
+  <input
+    type="text"
+    id="minaStudyInput"
+    placeholder="Enter your study task..."
+  >
+
+  <button onclick="minaAddStudyTask()">
+    Add Task +
+  </button>
+
+  <div id="minaStudyList"></div>
+
+  <p id="minaStudyCount">Completed: 0</p>
+</section>
+
+<script>
+let minaStudyTasks = [];
+
+try {
+  minaStudyTasks = JSON.parse(
+    localStorage.getItem("minaStudyTasks") || "[]"
+  );
+} catch (error) {
+  minaStudyTasks = [];
+}
+
+function minaSaveStudyTasks() {
+  localStorage.setItem(
+    "minaStudyTasks",
+    JSON.stringify(minaStudyTasks)
+  );
+}
+
+function minaAddStudyTask() {
+  const input = document.getElementById("minaStudyInput");
+  const task = input.value.trim();
+
+  if (!task) {
+    alert("Please enter a study task.");
+    return;
+  }
+
+  minaStudyTasks.push({
+    text: task,
+    completed: false
+  });
+
+  input.value = "";
+  minaSaveStudyTasks();
+  minaShowStudyTasks();
+}
+
+function minaToggleStudyTask(index) {
+  minaStudyTasks[index].completed =
+    !minaStudyTasks[index].completed;
+
+  minaSaveStudyTasks();
+  minaShowStudyTasks();
+}
+
+function minaDeleteStudyTask(index) {
+  minaStudyTasks.splice(index, 1);
+  minaSaveStudyTasks();
+  minaShowStudyTasks();
+}
+
+function minaShowStudyTasks() {
+  const list = document.getElementById("minaStudyList");
+  list.innerHTML = "";
+
+  minaStudyTasks.forEach((task, index) => {
+    const item = document.createElement("div");
+    item.className = "study-task";
+
+    if (task.completed) {
+      item.classList.add("done");
+    }
+
+    const label = document.createElement("span");
+    label.textContent = task.text;
+
+    const completeButton = document.createElement("button");
+    completeButton.textContent =
+      task.completed ? "Undo" : "Done";
+
+    completeButton.onclick = () =>
+      minaToggleStudyTask(index);
+
+    const deleteButton = document.createElement("button");
+    deleteButton.textContent = "Delete";
+    deleteButton.onclick = () =>
+      minaDeleteStudyTask(index);
+
+    item.append(label, completeButton, deleteButton);
+    list.appendChild(item);
+  });
+
+  const completed = minaStudyTasks.filter(
+    task => task.completed
+  ).length;
+
+  document.getElementById("minaStudyCount").textContent =
+    "Completed: " + completed +
+    " / " + minaStudyTasks.length;
+}
+
+minaShowStudyTasks();
+</script>
