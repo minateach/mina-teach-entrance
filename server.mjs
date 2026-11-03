@@ -1,0 +1,461 @@
+import { createServer } from "node:http";
+import { readFile } from "node:fs/promises";
+import { extname, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+import { ReplitConnectors } from "@replit/connectors-sdk";
+
+const projectRoot = resolve(fileURLToPath(new URL(".", import.meta.url)));
+const port = Number(process.env.PORT || 5000);
+const host = "0.0.0.0";
+const maxBodyBytes = 20 * 1024;
+const maxHistoryMessages = 10;
+const maxMessageLength = 2_000;
+const supportedGrades = new Set([9, 10, 11, 12]);
+const supportedLanguages = new Set(["en", "am", "om"]);
+const connectors = new ReplitConnectors();
+const chatRateWindows = new Map();
+const chatRateWindowMs = 60_000;
+const maxChatRequestsPerWindow = 30;
+
+const languageNames = {
+  en: "English",
+  am: "Amharic",
+  om: "Afaan Oromoo",
+};
+
+const setupMessage =
+  "The AI tutor is not connected yet. Connect or update MiniMax in Replit Integrations, then restart the app. Your conversation stays in this browser.";
+
+function setSecurityHeaders(response) {
+  response.setHeader("X-Content-Type-Options", "nosniff");
+  response.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  response.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  response.setHeader(
+    "Content-Security-Policy",
+    "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self'; font-src 'self' https://fonts.gstatic.com data:; base-uri 'self'; form-action 'self'; frame-ancestors 'self'",
+  );
+}
+
+function sendJson(response, statusCode, body) {
+  setSecurityHeaders(response);
+  response.writeHead(statusCode, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+  });
+  response.end(JSON.stringify(body));
+}
+
+function sendError(response, statusCode, code, message) {
+  sendJson(response, statusCode, { error: { code, message } });
+}
+
+async function readJsonBody(request) {
+  if (!request.headers["content-type"]?.toLowerCase().includes("application/json")) {
+    const error = new Error("Send the request as JSON.");
+    error.statusCode = 415;
+    throw error;
+  }
+
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += chunk.length;
+    if (size > maxBodyBytes) {
+      const error = new Error("This message is too large. Shorten it and try again.");
+      error.statusCode = 413;
+      throw error;
+    }
+    chunks.push(chunk);
+  }
+
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    const error = new Error("The request could not be read. Please try again.");
+    error.statusCode = 400;
+    throw error;
+  }
+}
+
+function cleanHistory(history) {
+  if (!Array.isArray(history)) return [];
+
+  return history
+    .filter(
+      (message) =>
+        message &&
+        (message.role === "user" || message.role === "assistant") &&
+        typeof message.content === "string",
+    )
+    .slice(-maxHistoryMessages)
+    .map((message) => ({
+      role: message.role,
+      content: message.content.trim().slice(0, 1_600),
+    }))
+    .filter((message) => message.content.length > 0);
+}
+
+function buildTutorInstructions(language, grade) {
+  return [
+    "You are Mina Teach's AI Assistant, a patient educational tutor for Ethiopian students preparing for the National University Entrance Examination.",
+    'Mina Teach\'s mission is: "Dhaloota beekumsa omishuudha."',
+    `The student is in Grade ${grade}. Write your answer in ${languageNames[language]}.`,
+    "Support English, Mathematics, Physics, Chemistry, Biology, Geography, History, Economics, and Civics, along with related entrance-exam study questions.",
+    "Explain difficult ideas in clear, numbered steps. For calculations, show the method, units, and a brief check of the answer.",
+    "When the student asks to explain an English question in Afaan Oromoo, translate the question and choices into Afaan Oromoo, explain key English words, and then reason through the answer in Afaan Oromoo.",
+    "When asked to create practice, write a Grade-appropriate multiple-choice question with four options, identify the correct answer, and give a concise explanation. Label generated material as practice, not as an official past exam.",
+    "Do not claim that a question comes from an official Ethiopian exam unless the student provided a verifiable source. Do not invent curriculum facts; say when you are unsure and encourage checking the student's textbook or official syllabus.",
+    "Be encouraging and concise. Ask one clarifying question when the student's request is too broad to answer accurately.",
+  ].join(" ");
+}
+
+function normalizeProviderError(response, providerBody) {
+  const providerCode = Number(providerBody?.base_resp?.status_code);
+  const providerMessage = String(
+    providerBody?.base_resp?.status_msg || providerBody?.error?.message || "",
+  ).toLowerCase();
+
+  if (
+    response.status === 401 ||
+    response.status === 403 ||
+    providerCode === 1004 ||
+    providerCode === 2049 ||
+    providerMessage.includes("authentication") ||
+    providerMessage.includes("api key")
+  ) {
+    return {
+      statusCode: 503,
+      code: "SETUP_REQUIRED",
+      message: setupMessage,
+    };
+  }
+
+  if (response.status === 429 || providerCode === 1002 || providerCode === 2056) {
+    return {
+      statusCode: 429,
+      code: "RATE_LIMITED",
+      message: "The tutor is receiving many requests right now. Please wait a moment and try again.",
+    };
+  }
+
+  return {
+    statusCode: 502,
+    code: "PROVIDER_ERROR",
+    message: "The tutor could not answer right now. Please try again in a moment.",
+  };
+}
+
+function getAnswerText(providerBody) {
+  const content = providerBody?.choices?.[0]?.message?.content;
+  if (typeof content === "string") return content.trim();
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => (typeof part === "string" ? part : part?.text || ""))
+      .join("")
+      .trim();
+  }
+  return "";
+}
+
+function consumeChatRateLimit(request) {
+  const forwardedFor = request.headers["x-forwarded-for"];
+  const forwardedAddresses =
+    typeof forwardedFor === "string"
+      ? forwardedFor.split(",").map((address) => address.trim()).filter(Boolean)
+      : [];
+  const clientAddress =
+    forwardedAddresses.at(-1) || request.socket.remoteAddress || "unknown";
+  const now = Date.now();
+  let window = chatRateWindows.get(clientAddress);
+
+  if (!window || now - window.startedAt >= chatRateWindowMs) {
+    window = { startedAt: now, count: 0 };
+    chatRateWindows.set(clientAddress, window);
+  }
+  window.count += 1;
+
+  if (chatRateWindows.size > 10_000) {
+    for (const [address, entry] of chatRateWindows) {
+      if (now - entry.startedAt >= chatRateWindowMs) chatRateWindows.delete(address);
+    }
+  }
+
+  return {
+    allowed: window.count <= maxChatRequestsPerWindow,
+    retryAfter: Math.max(1, Math.ceil((window.startedAt + chatRateWindowMs - now) / 1_000)),
+  };
+}
+
+async function handleAssistantChat(request, response) {
+  let input;
+  try {
+    input = await readJsonBody(request);
+  } catch (error) {
+    sendError(
+      response,
+      error.statusCode || 400,
+      error.statusCode === 413 ? "MESSAGE_TOO_LARGE" : "INVALID_REQUEST",
+      error.message,
+    );
+    return;
+  }
+
+  const grade = Number(input?.grade);
+  const language = input?.language;
+  const message =
+    typeof input?.message === "string" ? input.message.trim().slice(0, maxMessageLength) : "";
+
+  if (!supportedGrades.has(grade)) {
+    sendError(response, 400, "INVALID_GRADE", "Choose Grade 9, 10, 11, or 12.");
+    return;
+  }
+  if (!supportedLanguages.has(language)) {
+    sendError(response, 400, "INVALID_LANGUAGE", "Choose English, Amharic, or Afaan Oromoo.");
+    return;
+  }
+  if (!message) {
+    sendError(response, 400, "EMPTY_MESSAGE", "Type a question before sending.");
+    return;
+  }
+
+  const messages = [
+    { role: "system", content: buildTutorInstructions(language, grade) },
+    ...cleanHistory(input.history),
+    { role: "user", content: message },
+  ];
+
+  try {
+    const providerResponse = await connectors.proxy("minimax", "/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: process.env.MINIMAX_MODEL || "MiniMax-M3",
+        messages,
+        temperature: 0.35,
+        max_tokens: 1_000,
+      }),
+      signal: AbortSignal.timeout(45_000),
+    });
+
+    let providerBody = null;
+    try {
+      providerBody = await providerResponse.json();
+    } catch {
+      providerBody = null;
+    }
+
+    const providerCode = Number(providerBody?.base_resp?.status_code);
+    if (!providerResponse.ok || (Number.isFinite(providerCode) && providerCode !== 0)) {
+      const failure = normalizeProviderError(providerResponse, providerBody);
+      sendError(response, failure.statusCode, failure.code, failure.message);
+      return;
+    }
+
+    const answer = getAnswerText(providerBody);
+    if (!answer) {
+      sendError(
+        response,
+        502,
+        "EMPTY_PROVIDER_RESPONSE",
+        "The tutor returned an empty answer. Please try asking in a different way.",
+      );
+      return;
+    }
+
+    sendJson(response, 200, { answer });
+  } catch (error) {
+    if (error?.name === "TimeoutError" || error?.name === "AbortError") {
+      sendError(
+        response,
+        504,
+        "TUTOR_TIMEOUT",
+        "The tutor is taking longer than expected. Please try again.",
+      );
+      return;
+    }
+
+    const details = String(error?.message || "").toLowerCase();
+    if (
+      details.includes("not connected") ||
+      details.includes("unauthorized") ||
+      details.includes("credential") ||
+      details.includes("authentication")
+    ) {
+      sendError(response, 503, "SETUP_REQUIRED", setupMessage);
+      return;
+    }
+
+    console.error("[assistant] MiniMax request failed.");
+    sendError(
+      response,
+      502,
+      "TUTOR_UNAVAILABLE",
+      "The tutor could not connect right now. Please try again shortly.",
+    );
+  }
+}
+
+async function handleAssistantStatus(response) {
+  try {
+    const providerResponse = await connectors.proxy("minimax", "/v1/models", {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    let providerBody = null;
+    try {
+      providerBody = await providerResponse.json();
+    } catch {
+      providerBody = null;
+    }
+
+    const providerCode = Number(providerBody?.base_resp?.status_code);
+    if (!providerResponse.ok || (Number.isFinite(providerCode) && providerCode !== 0)) {
+      const failure = normalizeProviderError(providerResponse, providerBody);
+      const unavailableMessage =
+        failure.code === "SETUP_REQUIRED"
+          ? failure.message
+          : "MiniMax could not be reached right now. Refresh this page and try again.";
+      sendJson(response, 200, {
+        provider: "minimax",
+        configured: false,
+        code: failure.code,
+        message: unavailableMessage,
+      });
+      return;
+    }
+
+    sendJson(response, 200, {
+      provider: "minimax",
+      configured: true,
+      message: "MiniMax is ready through Replit Integrations.",
+    });
+  } catch (error) {
+    const details = String(error?.message || "").toLowerCase();
+    const message =
+      details.includes("not connected") ||
+      details.includes("unauthorized") ||
+      details.includes("credential") ||
+      details.includes("authentication")
+        ? setupMessage
+        : "MiniMax could not be reached right now. Refresh this page and try again.";
+    sendJson(response, 200, {
+      provider: "minimax",
+      configured: false,
+      code:
+        message === setupMessage ? "SETUP_REQUIRED" : "PROVIDER_UNAVAILABLE",
+      message,
+    });
+  }
+}
+
+function publicFilePath(pathname) {
+  if (pathname === "/" || pathname === "/index.html") return "index.html";
+  if (pathname === "/assistant" || pathname === "/assistant/") {
+    return "assistant/index.html";
+  }
+
+  const allowedTopLevelFiles = new Set(["/Index.html", "/Index.HTml"]);
+  if (allowedTopLevelFiles.has(pathname)) return pathname.slice(1);
+  if (pathname.startsWith("/assistant/")) return pathname.slice(1);
+  return null;
+}
+
+async function serveStatic(pathname, request, response) {
+  const relativePath = publicFilePath(pathname);
+  if (!relativePath) {
+    sendError(response, 404, "NOT_FOUND", "Page not found.");
+    return;
+  }
+
+  const absolutePath = resolve(projectRoot, relativePath);
+  if (!absolutePath.startsWith(`${projectRoot}${sep}`)) {
+    sendError(response, 404, "NOT_FOUND", "Page not found.");
+    return;
+  }
+
+  try {
+    const content = await readFile(absolutePath);
+    const contentTypes = {
+      ".css": "text/css; charset=utf-8",
+      ".html": "text/html; charset=utf-8",
+      ".htm": "text/html; charset=utf-8",
+      ".js": "text/javascript; charset=utf-8",
+      ".svg": "image/svg+xml",
+      ".png": "image/png",
+      ".jpg": "image/jpeg",
+      ".webp": "image/webp",
+    };
+
+    setSecurityHeaders(response);
+    response.writeHead(200, {
+      "Content-Type": contentTypes[extname(absolutePath).toLowerCase()] || "application/octet-stream",
+      "Cache-Control": "no-store",
+      "Content-Length": content.length,
+    });
+    response.end(request.method === "HEAD" ? undefined : content);
+  } catch {
+    sendError(response, 404, "NOT_FOUND", "Page not found.");
+  }
+}
+
+const server = createServer(async (request, response) => {
+  const requestUrl = new URL(request.url || "/", "http://localhost");
+  const pathname = requestUrl.pathname;
+
+  if (request.method === "GET" && pathname === "/api/assistant/status") {
+    await handleAssistantStatus(response);
+    return;
+  }
+
+  if (pathname === "/api/assistant/chat") {
+    if (request.method !== "POST") {
+      sendError(response, 405, "METHOD_NOT_ALLOWED", "Use POST to send a tutor question.");
+      return;
+    }
+
+    const origin = request.headers.origin;
+    if (origin) {
+      try {
+        if (new URL(origin).host !== request.headers.host) {
+          sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed.");
+          return;
+        }
+      } catch {
+        sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed.");
+        return;
+      }
+    }
+
+    const rateLimit = consumeChatRateLimit(request);
+    if (!rateLimit.allowed) {
+      response.setHeader("Retry-After", String(rateLimit.retryAfter));
+      sendError(
+        response,
+        429,
+        "RATE_LIMITED",
+        "Too many tutor requests from this connection. Please wait a minute and try again.",
+      );
+      return;
+    }
+
+    await handleAssistantChat(request, response);
+    return;
+  }
+
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    sendError(response, 405, "METHOD_NOT_ALLOWED", "This request method is not supported.");
+    return;
+  }
+
+  try {
+    await serveStatic(decodeURIComponent(pathname), request, response);
+  } catch {
+    sendError(response, 400, "INVALID_PATH", "This page address is not valid.");
+  }
+});
+
+server.listen(port, host, () => {
+  console.log(`Mina Teach is listening on ${host}:${port}`);
+});
