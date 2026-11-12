@@ -471,6 +471,7 @@ async function handleAssistantStatus(response) {
 
 function publicFilePath(pathname) {
   if (pathname === "/" || pathname === "/index.html") return "index.html";
+  if (pathname === "/manifest.webmanifest") return "manifest.webmanifest";
   if (pathname === "/assistant" || pathname === "/assistant/") {
     return "assistant/index.html";
   }
@@ -518,6 +519,7 @@ async function serveStatic(pathname, request, response) {
       ".htm": "text/html; charset=utf-8",
       ".js": "text/javascript; charset=utf-8",
       ".svg": "image/svg+xml",
+      ".webmanifest": "application/manifest+json; charset=utf-8",
       ".png": "image/png",
       ".jpg": "image/jpeg",
       ".webp": "image/webp",

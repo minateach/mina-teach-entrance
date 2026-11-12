@@ -243,6 +243,11 @@ function createWelcome() {
   welcome.className = "welcome";
   welcome.setAttribute("aria-labelledby", "welcomeTitle");
 
+  const logo = document.createElement("img");
+  logo.className = "welcome-logo";
+  logo.src = "/assistant/brand-logo.jpg";
+  logo.alt = "";
+
   const kicker = document.createElement("div");
   kicker.className = "welcome-kicker";
   kicker.textContent = "Your study companion";
@@ -278,7 +283,7 @@ function createWelcome() {
     "oromo"
   );
   prompts.append(practiceButton, oromoButton);
-  welcome.append(kicker, title, description, details, prompts);
+  welcome.append(logo, kicker, title, description, details, prompts);
   return welcome;
 }
 

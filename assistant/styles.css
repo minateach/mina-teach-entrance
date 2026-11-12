@@ -91,6 +91,13 @@ a {
   text-decoration: none;
 }
 
+.brand-logo {
+  display: block;
+  width: 58px;
+  height: 42px;
+  object-fit: contain;
+}
+
 .brand-mark {
   display: grid;
   width: 42px;
@@ -491,6 +498,14 @@ a {
   align-content: center;
   margin: auto;
   padding: 22px 0 30px;
+}
+
+.welcome-logo {
+  display: block;
+  width: min(220px, 70%);
+  height: auto;
+  margin: 0 0 20px;
+  object-fit: contain;
 }
 
 .welcome-kicker {
@@ -959,6 +974,15 @@ a {
   .brand-mark {
     width: 38px;
     height: 38px;
+  }
+
+  .brand-logo {
+    width: 48px;
+    height: 34px;
+  }
+
+  .welcome-logo {
+    width: min(190px, 72%);
   }
 
   .brand-subtitle {
