@@ -45,6 +45,10 @@ existing work.
 - Existing browser data remains local until the student explicitly imports it.
   Deleting saved Mina Teach data removes the account copy and the two supported
   browser copies; it does not delete the Clerk sign-in account.
-- All users receive the `student` role by default. There is no self-service
-  role elevation; do not enable educator management until the owner identifies
-  the first trusted educator or administrator.
+- All users receive the `student` role by default. The one-time development
+  first-admin claim is restricted to the owner's verified email, stored only as
+  a SHA-256 digest, and consumed atomically. Never add public self-service role
+  elevation, hardcode the owner's email, or bypass verified-email checks.
+- The first admin can create and edit question drafts and approve or reject
+  questions. Student exams may only use approved, source-labeled curriculum
+  questions; AI-generated practice stays separate from that bank.

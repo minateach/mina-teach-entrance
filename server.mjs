@@ -1,9 +1,10 @@
 import { readFile } from "node:fs/promises";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ReplitConnectors } from "@replit/connectors-sdk";
 import express from "express";
-import { clerkMiddleware, getAuth } from "@clerk/express";
+import { clerkClient, clerkMiddleware, getAuth } from "@clerk/express";
 import { publishableKeyFromHost } from "@clerk/shared/keys";
 import pg from "pg";
 import { CLERK_PROXY_PATH, clerkProxyMiddleware, getClerkProxyHost } from "./server/middlewares/clerkProxyMiddleware.mjs";
@@ -421,13 +422,20 @@ async function serveStatic(pathname, request, response) {
   }
 }
 
-function requireAuth(request, response, next) {
+async function requireAuth(request, response, next) {
   const auth = getAuth(request);
   if (!auth?.userId) {
     sendError(response, 401, "UNAUTHORIZED", "Sign in to access your saved account data.");
     return;
   }
   request.userId = auth.userId;
+  try {
+    await ensureStudentRole(request.userId);
+    await bootstrapFirstAdmin(request.userId);
+  } catch {
+    sendError(response, 500, "ACCOUNT_STORAGE_ERROR", "Account data is temporarily unavailable.");
+    return;
+  }
   next();
 }
 
@@ -474,6 +482,42 @@ async function ensureStudentRole(userId) {
   await pool.query("INSERT INTO mina_user_roles (user_id, role) VALUES ($1, 'student') ON CONFLICT (user_id) DO NOTHING", [userId]);
 }
 
+async function bootstrapFirstAdmin(userId) {
+  const available = await pool.query(
+    "SELECT email_hash FROM mina_admin_bootstrap WHERE id=1 AND used_by IS NULL AND NOT EXISTS (SELECT 1 FROM mina_user_roles WHERE role='admin')",
+  );
+  if (!available.rowCount) return false;
+  const user = await clerkClient.users.getUser(userId);
+  const verifiedHashes = (user.emailAddresses || [])
+    .filter(address => address.verification?.status === "verified")
+    .map(address => createHash("sha256").update(address.emailAddress.trim().toLowerCase()).digest("hex"));
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const config = await client.query("SELECT email_hash,used_by FROM mina_admin_bootstrap WHERE id=1 FOR UPDATE");
+    const admins = await client.query("SELECT 1 FROM mina_user_roles WHERE role='admin' LIMIT 1");
+    const row = config.rows[0];
+    const storedHash = row ? Buffer.from(row.email_hash.trim(), "hex") : Buffer.alloc(0);
+    const ownerEmailMatches = storedHash.length === 32 && verifiedHashes.some(hash => {
+      const candidate = Buffer.from(hash, "hex");
+      return candidate.length === storedHash.length && timingSafeEqual(candidate, storedHash);
+    });
+    if (!row || row.used_by || admins.rowCount || !ownerEmailMatches) {
+      await client.query("ROLLBACK");
+      return false;
+    }
+    await client.query("UPDATE mina_user_roles SET role='admin' WHERE user_id=$1", [userId]);
+    await client.query("UPDATE mina_admin_bootstrap SET used_by=$1,used_at=NOW() WHERE id=1", [userId]);
+    await client.query("COMMIT");
+    return true;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function getAccountRecords(userId) {
   const result = await pool.query("SELECT record_type, data FROM mina_user_records WHERE user_id = $1", [userId]);
   return Object.fromEntries(result.rows.map(row => [row.record_type, row.data]));
@@ -503,6 +547,7 @@ app.get("/api/account/status", async (request, response) => {
   if (!userId) { sendJson(response, 200, { signedIn: false }); return; }
   try {
     await ensureStudentRole(userId);
+    await bootstrapFirstAdmin(userId);
     const result = await pool.query("SELECT role FROM mina_user_roles WHERE user_id=$1", [userId]);
     sendJson(response, 200, { signedIn: true, role: result.rows[0]?.role || "student" });
   } catch { sendJson(response, 200, { signedIn: true, role: "student" }); }
@@ -579,6 +624,23 @@ app.delete("/api/account/data", requireAuth, async (request, response) => {
 const questionStreams = new Set(["natural", "social", "common"]);
 const difficulties = new Set(["easy", "medium", "hard"]);
 const sourceKinds = new Set(["textbook", "teacher_authored", "open_resource", "ai_generated", "legacy"]);
+function isValidQuestionInput(input) {
+  if (!input || ![9,10,11,12].includes(Number(input.grade)) || !questionStreams.has(input.stream) ||
+      !difficulties.has(input.difficulty) || !sourceKinds.has(input.sourceKind || "teacher_authored") ||
+      typeof input.subject !== "string" || !input.subject.trim() ||
+      typeof input.chapter !== "string" || !input.chapter.trim() ||
+      typeof input.prompt !== "string" || !input.prompt.trim() ||
+      typeof input.explanation !== "string" || !input.explanation.trim() ||
+      typeof input.sourceLabel !== "string" || !input.sourceLabel.trim() ||
+      !Array.isArray(input.choices) || input.choices.length !== 4 ||
+      input.choices.some(choice => typeof choice !== "string" || !choice.trim()) ||
+      !Number.isInteger(input.correctIndex) || input.correctIndex < 0 || input.correctIndex > 3) return false;
+  if (input.sourceUrl) {
+    try { if (!["http:", "https:"].includes(new URL(input.sourceUrl).protocol)) return false; }
+    catch { return false; }
+  }
+  return true;
+}
 function questionFilters(query, approvedOnly = true) {
   const clauses = approvedOnly ? ["review_status = 'approved'", "source_kind <> 'ai_generated'"] : [];
   const params = [];
@@ -679,7 +741,7 @@ app.post("/api/questions", requireAuth, requireRole("educator", "admin"), async 
   try {
     if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
     const input = await readJsonBody(request);
-    if (![9,10,11,12].includes(Number(input.grade)) || !questionStreams.has(input.stream) || !difficulties.has(input.difficulty) || !sourceKinds.has(input.sourceKind || "teacher_authored") || !Array.isArray(input.choices) || input.choices.length !== 4 || !Number.isInteger(input.correctIndex) || input.correctIndex < 0 || input.correctIndex > 3 || !input.prompt || !input.explanation || !input.sourceLabel) {
+    if (!isValidQuestionInput(input)) {
       sendError(response, 400, "INVALID_QUESTION", "Provide grade, stream, subject, chapter, four choices, answer, explanation, difficulty, and source.");
       return;
     }
@@ -688,11 +750,39 @@ app.post("/api/questions", requireAuth, requireRole("educator", "admin"), async 
   } catch { sendError(response, 500, "QUESTION_SAVE_FAILED", "The question could not be saved."); }
 });
 
+app.post("/api/questions/import", requireAuth, requireRole("educator", "admin"), async (request, response) => {
+  if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
+  let client;
+  try {
+    const input = await readJsonBody(request, 1_500_000);
+    const questions = Array.isArray(input) ? input : input?.questions;
+    if (!Array.isArray(questions) || questions.length < 1 || questions.length > 200 || !questions.every(isValidQuestionInput)) {
+      sendError(response, 400, "INVALID_QUESTION_BATCH", "Upload 1–200 complete questions with four choices, explanations, difficulty, and source labels.");
+      return;
+    }
+    client = await pool.connect();
+    await client.query("BEGIN");
+    const ids = [];
+    for (const question of questions) {
+      const result = await client.query(
+        "INSERT INTO mina_questions (grade,stream,subject,chapter,prompt,choices,correct_index,explanation,difficulty,source_label,source_url,source_kind,review_status,created_by,updated_by) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,'draft',$13,$13) RETURNING id",
+        [Number(question.grade),question.stream,question.subject.trim().slice(0,80),question.chapter.trim().slice(0,120),question.prompt.trim().slice(0,1000),JSON.stringify(question.choices.map(choice=>choice.trim().slice(0,300))),question.correctIndex,question.explanation.trim().slice(0,2000),question.difficulty,question.sourceLabel.trim().slice(0,300),question.sourceUrl?.trim().slice(0,500)||null,question.sourceKind||"teacher_authored",request.userId],
+      );
+      ids.push(String(result.rows[0].id));
+    }
+    await client.query("COMMIT");
+    sendJson(response, 201, { imported: ids.length, reviewStatus: "draft" });
+  } catch {
+    if (client) await client.query("ROLLBACK").catch(()=>{});
+    sendError(response, 500, "QUESTION_IMPORT_FAILED", "The question batch could not be imported.");
+  } finally { client?.release(); }
+});
+
 app.put("/api/questions/:id", requireAuth, requireRole("educator", "admin"), async (request, response) => {
   try {
     if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
     const input = await readJsonBody(request);
-    if (![9,10,11,12].includes(Number(input.grade)) || !questionStreams.has(input.stream) || !difficulties.has(input.difficulty) || !sourceKinds.has(input.sourceKind || "teacher_authored") || !Array.isArray(input.choices) || input.choices.length !== 4 || !Number.isInteger(input.correctIndex) || input.correctIndex < 0 || input.correctIndex > 3 || !input.prompt || !input.explanation || !input.sourceLabel) {
+    if (!isValidQuestionInput(input)) {
       sendError(response, 400, "INVALID_QUESTION", "Question fields are incomplete or invalid."); return;
     }
     const result = await pool.query("UPDATE mina_questions SET grade=$1,stream=$2,subject=$3,chapter=$4,prompt=$5,choices=$6::jsonb,correct_index=$7,explanation=$8,difficulty=$9,source_label=$10,source_url=$11,source_kind=$12,review_status='draft',reviewed_by=NULL,reviewed_at=NULL,updated_by=$13,updated_at=NOW() WHERE id=$14 RETURNING id", [Number(input.grade),input.stream,String(input.subject).slice(0,80),String(input.chapter).slice(0,120),String(input.prompt).slice(0,1000),JSON.stringify(input.choices.map(value=>String(value).slice(0,300))),input.correctIndex,String(input.explanation).slice(0,2000),input.difficulty,String(input.sourceLabel).slice(0,300),input.sourceUrl?String(input.sourceUrl).slice(0,500):null,input.sourceKind || "teacher_authored",request.userId,request.params.id]);

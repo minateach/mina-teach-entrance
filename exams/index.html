@@ -45,6 +45,7 @@
         <div class="filters"><label>Correct choice<select name="correctIndex"><option value="0">A</option><option value="1">B</option><option value="2">C</option><option value="3">D</option></select></label><label>Source label<input name="sourceLabel" required placeholder="Textbook title, chapter, or teacher-authored"></label><label>Source URL<input name="sourceUrl" type="url"></label></div>
         <label>Explanation<textarea name="explanation" required maxlength="2000"></textarea></label><button>Save as draft</button>
       </form><p id="educator-status" role="status"></p><div id="draft-list"></div>
+      <details class="import-help"><summary>Import a question file</summary><p>Upload a JSON array or an object with a <code>questions</code> array. Every entry must include grade, stream, subject, chapter, prompt, four choices, correctIndex (0–3), explanation, difficulty, sourceLabel, and optional sourceUrl/sourceKind. Imports are drafts and are never auto-approved.</p><form id="question-import"><label>Question JSON file<input type="file" name="file" accept=".json,application/json" required></label><button>Import as drafts</button></form><p id="import-status" role="status"></p></details>
     </section>
     <footer>MINA TEACH AI · Dhaloota beekumsa omishuudha.</footer>
   </main>

@@ -58,6 +58,8 @@
   async function loadEducator(){
     try{const account=await api("/api/account/data");if(!["educator","admin"].includes(account.role))return;
       $("educator").hidden=false;
+      $("educator").querySelector(".eyebrow").textContent=account.role==="admin"?"ADMINISTRATOR REVIEW":"AUTHORIZED EDUCATOR";
+      $("educator").querySelector(".muted").textContent=account.role==="admin"?"You can edit, approve, and reject sourced questions. Only approved curriculum questions appear in student exams.":"New questions start as drafts. An administrator must review and approve them before they appear in student exams.";
       const manage=await api("/api/questions/manage");
       $("draft-list").replaceChildren();
       manage.questions.forEach(q=>{
@@ -68,7 +70,14 @@
           (q.choices||[]).forEach((value,i)=>f.elements[`choice${i}`].value=value);
           f.querySelector("button[type=submit]").textContent="Save changes as draft";
         };row.append(edit);
-        if(account.role==="admin"&&q.review_status==="draft"){const approve=document.createElement("button");approve.textContent="Approve";approve.onclick=async()=>{await api(`/api/questions/${q.id}/review`,{method:"POST",body:JSON.stringify({status:"approved"})});loadEducator();updateCount();};row.append(approve);}
+        if(account.role==="admin"){
+          for(const status of ["approved","rejected"]){
+            if(status===q.review_status)continue;
+            const review=document.createElement("button");review.textContent=status==="approved"?"Approve":"Reject";
+            review.onclick=async()=>{try{await api(`/api/questions/${q.id}/review`,{method:"POST",body:JSON.stringify({status})});loadEducator();updateCount();}catch(e){$("educator-status").textContent=e.message;}};
+            row.append(review);
+          }
+        }
         $("draft-list").append(row);
       });
     }catch{}
@@ -78,6 +87,16 @@
     payload.grade=Number(payload.grade);payload.correctIndex=Number(payload.correctIndex);payload.choices=[0,1,2,3].map(i=>payload[`choice${i}`]);delete payload.choice0;delete payload.choice1;delete payload.choice2;delete payload.choice3;
     try{const result=await api(editingQuestionId?`/api/questions/${editingQuestionId}`:"/api/questions",{method:editingQuestionId?"PUT":"POST",body:JSON.stringify(payload)});$("educator-status").textContent=`${editingQuestionId?"Updated":"Saved"} as a draft; an administrator must review it.`;editingQuestionId=null;event.currentTarget.reset();event.currentTarget.querySelector("button[type=submit]").textContent="Save as draft";loadEducator();}
     catch(e){$("educator-status").textContent=e.status===401?"Sign in required.":e.status===403?"Educator access has not been assigned to this account.":e.message;}
+  });
+  $("question-import").addEventListener("submit",async event=>{
+    event.preventDefault();const file=event.currentTarget.elements.file.files[0];if(!file)return;
+    if(file.size>1_400_000){$("import-status").textContent="Choose a JSON file smaller than 1.4 MB.";return;}
+    try{
+      const payload=JSON.parse(await file.text());
+      const result=await api("/api/questions/import",{method:"POST",body:JSON.stringify(payload)});
+      $("import-status").textContent=`Imported ${result.imported} questions as drafts; administrator review is still required.`;
+      event.currentTarget.reset();await loadEducator();
+    }catch(e){$("import-status").textContent=e.message==="Unexpected end of JSON input"?"The selected file is not valid JSON.":e.status===403?"Educator access has not been assigned to this account.":e.message;}
   });
   ["grade","stream","subject","difficulty"].forEach(id=>$(id).addEventListener("change",updateCount));
   $("start-exam").onclick=async()=>{
