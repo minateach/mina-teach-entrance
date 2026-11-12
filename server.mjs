@@ -15,7 +15,7 @@ const maxBodyBytes = 20 * 1024;
 const maxHistoryMessages = 10;
 const maxMessageLength = 2_000;
 const supportedGrades = new Set([9, 10, 11, 12]);
-const supportedLanguages = new Set(["en", "am", "om"]);
+const supportedLanguages = new Set(["auto", "en", "am", "om"]);
 const { Pool } = pg;
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const allowedRecordTypes = new Set(["conversations", "learning", "preferences"]);
@@ -24,13 +24,14 @@ const chatRateWindowMs = 60_000;
 const maxChatRequestsPerWindow = 30;
 
 const languageNames = {
+  auto: "the language used in the student's message",
   en: "English",
   am: "Amharic",
   om: "Afaan Oromoo",
 };
 
 const setupMessage =
-  "MiniMax credentials are missing. Add a MiniMax Global API key as the server-side Replit Secret MINIMAX_API_KEY, then restart the app.";
+  "MiniMax credentials are missing. Add a MiniMax Global Pay-as-you-go API key as the server-side Replit Secret MINIMAX_API_KEY, then restart the app. An M Plan Subscription Key is a different credential.";
 
 function getLegacyInlineHashes(html) {
   const hash = value => `'sha256-${createHash("sha256").update(value).digest("base64")}'`;
@@ -113,10 +114,14 @@ function cleanHistory(history) {
 }
 
 function buildTutorInstructions(language, grade) {
+  const languageInstruction =
+    language === "auto"
+      ? "Automatically detect whether the student's latest message is in Afaan Oromoo, Amharic, or English, and answer in that same language. If the language is unclear, ask the student which language they prefer."
+      : `Write your answer in ${languageNames[language]}.`;
   return [
     "You are MINA TEACH AI's patient educational tutor for Ethiopian students preparing for the National University Entrance Examination.",
     'MINA TEACH AI\'s mission is: "Dhaloota beekumsa omishuudha."',
-    `The student is in Grade ${grade}. Write your answer in ${languageNames[language]}.`,
+    `The student is in Grade ${grade}. ${languageInstruction}`,
     "Support English, Mathematics, Physics, Chemistry, Biology, Geography, History, Economics, and Civics, along with related entrance-exam study questions.",
     "Explain difficult ideas in clear, numbered steps. For calculations, show the method, units, and a brief check of the answer.",
     "When the student asks to explain an English question in Afaan Oromoo, translate the question and choices into Afaan Oromoo, explain key English words, and then reason through the answer in Afaan Oromoo.",
@@ -143,7 +148,7 @@ function normalizeProviderError(response, providerBody) {
     return {
       statusCode: 503,
       code: "SETUP_REQUIRED",
-      message: "MiniMax rejected the configured API key. Use a valid key from the MiniMax Global platform in Replit Secrets.",
+      message: "MiniMax rejected MINIMAX_API_KEY. Create a Pay-as-you-go API key in MiniMax Global under API Keys > Create new secret key, then replace the Replit Secret MINIMAX_API_KEY and restart the app. An M Plan Subscription Key is not interchangeable.",
     };
   }
 
@@ -259,7 +264,7 @@ async function handleAssistantChat(request, response) {
     return;
   }
   if (!supportedLanguages.has(language)) {
-    sendError(response, 400, "INVALID_LANGUAGE", "Choose English, Amharic, or Afaan Oromoo.");
+    sendError(response, 400, "INVALID_LANGUAGE", "Choose automatic detection, English, Amharic, or Afaan Oromoo.");
     return;
   }
   if (!message) {

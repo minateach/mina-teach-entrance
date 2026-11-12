@@ -36,7 +36,7 @@ function readConversations() {
       typeof item.id === "string" &&
       typeof item.title === "string" &&
       [9, 10, 11, 12].includes(Number(item.grade)) &&
-      ["en", "am", "om"].includes(item.language) &&
+      ["auto", "en", "am", "om"].includes(item.language) &&
       Array.isArray(item.messages)
     );
   } catch {
