@@ -30,9 +30,9 @@ const languageNames = {
   om: "Afaan Oromoo",
 };
 
-const geminiModel = "gemini-3.8-flash";
+const geminiModel = "gemini-3.5-flash-lite";
 const geminiSetupMessage =
-  "Gemini is not configured. Add GEMINI_API_KEY in Replit Secrets using a Google AI Studio API key. This app uses the Gemini Free Tier model gemini-3.8-flash and does not enable paid billing.";
+  "Gemini is not configured. Add GEMINI_API_KEY in Replit Secrets using a Google AI Studio API key. This app uses the Gemini Free Tier model gemini-3.5-flash-lite and does not enable paid billing.";
 const setupMessage =
   "MiniMax credentials are missing. Add a MiniMax Global API key as the server-side Replit Secret MINIMAX_API_KEY.";
 
@@ -129,6 +129,7 @@ function buildTutorInstructions(language, grade) {
     "Explain difficult ideas in clear, numbered steps. For calculations, show the method, units, and a brief check of the answer.",
     "When the student asks to explain an English question in Afaan Oromoo, translate the question and choices into Afaan Oromoo, explain key English words, and then reason through the answer in Afaan Oromoo.",
     "When asked to create practice, write a Grade-appropriate multiple-choice question with four options, identify the correct answer, and give a concise explanation. Label generated material as practice, not as an official past exam.",
+    "Keep answers focused and reasonably concise. Do not add practice questions unless the student asks for them.",
     "Do not claim that a question comes from an official Ethiopian exam unless the student provided a verifiable source. Do not invent curriculum facts; say when you are unsure and encourage checking the student's textbook or official syllabus.",
     "Be encouraging and concise. Ask one clarifying question when the student's request is too broad to answer accurately.",
   ].join(" ");
@@ -228,6 +229,14 @@ function normalizeGeminiError(response, providerBody) {
       statusCode: 503,
       code: "GEMINI_MODEL_UNAVAILABLE",
       message: "The configured Gemini Free Tier model is unavailable to this API key.",
+    };
+  }
+
+  if (response.status === 503 || providerStatus === "UNAVAILABLE") {
+    return {
+      statusCode: 503,
+      code: "GEMINI_TEMPORARILY_UNAVAILABLE",
+      message: "Gemini Free Tier is temporarily unavailable. No answer was generated; try again later. Paid billing is not enabled.",
     };
   }
 
@@ -374,7 +383,7 @@ async function handleAssistantChat(request, response) {
         contents,
         generationConfig: {
           temperature: 0.35,
-          maxOutputTokens: 1_000,
+          maxOutputTokens: 768,
         },
       }),
       signal: AbortSignal.timeout(45_000),
@@ -428,7 +437,7 @@ async function handleAssistantChat(request, response) {
         response,
         504,
         "TUTOR_TIMEOUT",
-        "The tutor is taking longer than expected. Please try again.",
+        "Gemini did not respond before the request timed out. No answer was generated; you can retry later.",
       );
       return;
     }
