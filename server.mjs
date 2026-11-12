@@ -9,6 +9,7 @@ import pg from "pg";
 import { CLERK_PROXY_PATH, clerkProxyMiddleware, getClerkProxyHost } from "./server/middlewares/clerkProxyMiddleware.mjs";
 
 const projectRoot = resolve(fileURLToPath(new URL(".", import.meta.url)));
+const founderProfile = JSON.parse(await readFile(resolve(projectRoot, "server/founder-profile.json"), "utf8"));
 const port = Number(process.env.PORT || 5000);
 const host = "0.0.0.0";
 const maxBodyBytes = 20 * 1024;
@@ -116,6 +117,28 @@ function cleanHistory(history) {
     .filter((message) => message.content.length > 0);
 }
 
+function isFounderQuestion(message, history) {
+  const query = message.toLocaleLowerCase();
+  const priorContext = cleanHistory(history).map((item) => item.content).join(" ").toLocaleLowerCase();
+  const appMention = /mina[\s_-]*teach|ሚና\s*ቲች/i.test(query) || /mina[\s_-]*teach|ሚና\s*ቲች/i.test(priorContext);
+  const selfReference = /\b(this app|this assistant|your app|you|app kana|app keessan|app kee|ati|si)\b|ይህን|የዚህ|አንተ|አንቺ|እርስዎ|መተግበሪያ/i.test(query);
+  const founderTerms = /\b(founder|founded|created|creator|owner|owns|developed|developer|invented|inventor|made|built|kalaqe|kalaqan|uume|hojjete|abbaa|eenyutu|eenyu)\b|ፈጠረ|ፈጣሪ|መስራች|ባለቤት|ገነባ/i.test(query);
+  return founderTerms && (appMention || selfReference);
+}
+
+function founderResponseLanguage(language, message, history) {
+  if (language !== "auto") return language;
+  if (/[\u1200-\u137f]/u.test(message)) return "am";
+  if (/\b(kalaqe|kalaqan|uume|hojjete|abbaa|eenyutu|eenyu|app kana)\b/i.test(message)) return "om";
+  return "en";
+}
+
+function resolveFounderResponse(language, message, history) {
+  if (!isFounderQuestion(message, history)) return null;
+  const responseLanguage = founderResponseLanguage(language, message, history);
+  return founderProfile.responses[responseLanguage] || founderProfile.responses.en;
+}
+
 function buildTutorInstructions(language, grade) {
   const languageInstruction =
     language === "auto"
@@ -125,6 +148,7 @@ function buildTutorInstructions(language, grade) {
     "You are MINA TEACH AI's patient educational tutor for Ethiopian students preparing for the National University Entrance Examination.",
     'MINA TEACH AI\'s mission is: "Dhaloota beekumsa omishuudha."',
     `The student is in Grade ${grade}. ${languageInstruction}`,
+    `Persistent official founder identity: ${JSON.stringify(founderProfile.responses)} Always use the exact name "${founderProfile.canonicalName}" for founder questions, answer in the student's requested language, and do not add biography or achievements not present in this profile.`,
     "Support English, Mathematics, Physics, Chemistry, Biology, Geography, History, Economics, and Civics, along with related entrance-exam study questions.",
     "Explain difficult ideas in clear, numbered steps. For calculations, show the method, units, and a brief check of the answer.",
     "When the student asks to explain an English question in Afaan Oromoo, translate the question and choices into Afaan Oromoo, explain key English words, and then reason through the answer in Afaan Oromoo.",
@@ -350,6 +374,12 @@ async function handleAssistantChat(request, response) {
   }
   if (!message) {
     sendError(response, 400, "EMPTY_MESSAGE", "Type a question before sending.");
+    return;
+  }
+
+  const founderAnswer = resolveFounderResponse(language, message, input.history);
+  if (founderAnswer) {
+    sendJson(response, 200, { answer: founderAnswer, source: "persistent_app_knowledge" });
     return;
   }
 
