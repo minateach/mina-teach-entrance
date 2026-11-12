@@ -1,8 +1,12 @@
-import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ReplitConnectors } from "@replit/connectors-sdk";
+import express from "express";
+import { clerkMiddleware, getAuth } from "@clerk/express";
+import { publishableKeyFromHost } from "@clerk/shared/keys";
+import pg from "pg";
+import { CLERK_PROXY_PATH, clerkProxyMiddleware, getClerkProxyHost } from "./server/middlewares/clerkProxyMiddleware.mjs";
 
 const projectRoot = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const port = Number(process.env.PORT || 5000);
@@ -13,6 +17,9 @@ const maxMessageLength = 2_000;
 const supportedGrades = new Set([9, 10, 11, 12]);
 const supportedLanguages = new Set(["en", "am", "om"]);
 const connectors = new ReplitConnectors();
+const { Pool } = pg;
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const allowedRecordTypes = new Set(["conversations", "learning", "preferences"]);
 const chatRateWindows = new Map();
 const chatRateWindowMs = 60_000;
 const maxChatRequestsPerWindow = 30;
@@ -32,7 +39,7 @@ function setSecurityHeaders(response) {
   response.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
   response.setHeader(
     "Content-Security-Policy",
-    "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self'; font-src 'self' https://fonts.gstatic.com data:; base-uri 'self'; form-action 'self'; frame-ancestors 'self'",
+    "default-src 'self'; connect-src 'self' https://*.clerk.accounts.dev https://clerk-telemetry.com https://cdn.protect.clerk.com https://*.client.protect.clerk.com; img-src 'self' data: https://*.clerk.accounts.dev https://img.clerk.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' https://*.clerk.accounts.dev https://cdn.protect.clerk.com; worker-src 'self' blob:; frame-src https://*.clerk.accounts.dev; font-src 'self' https://fonts.gstatic.com data:; base-uri 'self'; form-action 'self'; frame-ancestors 'self'",
   );
 }
 
@@ -49,7 +56,7 @@ function sendError(response, statusCode, code, message) {
   sendJson(response, statusCode, { error: { code, message } });
 }
 
-async function readJsonBody(request) {
+async function readJsonBody(request, bodyLimit = maxBodyBytes) {
   if (!request.headers["content-type"]?.toLowerCase().includes("application/json")) {
     const error = new Error("Send the request as JSON.");
     error.statusCode = 415;
@@ -60,7 +67,7 @@ async function readJsonBody(request) {
   let size = 0;
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > maxBodyBytes) {
+    if (size > bodyLimit) {
       const error = new Error("This message is too large. Shorten it and try again.");
       error.statusCode = 413;
       throw error;
@@ -358,6 +365,12 @@ function publicFilePath(pathname) {
   if (pathname === "/learning" || pathname === "/learning/") {
     return "learning/index.html";
   }
+  if (pathname === "/account" || pathname === "/account/" || pathname.startsWith("/account/sign-in") || pathname.startsWith("/account/sign-up")) {
+    return "account-dist/index.html";
+  }
+  if (pathname.startsWith("/account/assets/")) {
+    return `account-dist${pathname.slice("/account".length)}`;
+  }
 
   const allowedTopLevelFiles = new Set(["/Index.html", "/Index.HTml"]);
   if (allowedTopLevelFiles.has(pathname)) return pathname.slice(1);
@@ -406,7 +419,152 @@ async function serveStatic(pathname, request, response) {
   }
 }
 
-const server = createServer(async (request, response) => {
+function requireAuth(request, response, next) {
+  const auth = getAuth(request);
+  if (!auth?.userId) {
+    sendError(response, 401, "UNAUTHORIZED", "Sign in to access your saved account data.");
+    return;
+  }
+  request.userId = auth.userId;
+  next();
+}
+
+function requireRole(...roles) {
+  return async (request, response, next) => {
+    try {
+      const result = await pool.query("SELECT role FROM mina_user_roles WHERE user_id = $1", [request.userId]);
+      if (!roles.includes(result.rows[0]?.role)) {
+        sendError(response, 403, "FORBIDDEN", "This action requires an authorized educator account.");
+        return;
+      }
+      next();
+    } catch {
+      sendError(response, 500, "ACCOUNT_STORAGE_ERROR", "Account data is temporarily unavailable.");
+    }
+  };
+}
+
+function isSameOrigin(request) {
+  if (!request.headers.origin) return true;
+  try {
+    return new URL(request.headers.origin).host === request.headers.host;
+  } catch {
+    return false;
+  }
+}
+
+function mergeImported(existing, incoming) {
+  if (Array.isArray(existing) && Array.isArray(incoming)) {
+    const merged = [...existing];
+    const signatures = new Set(existing.map(item => JSON.stringify(item)));
+    incoming.forEach(item => { const signature = JSON.stringify(item); if (!signatures.has(signature)) { signatures.add(signature); merged.push(item); } });
+    return merged;
+  }
+  if (existing && incoming && typeof existing === "object" && typeof incoming === "object" && !Array.isArray(existing) && !Array.isArray(incoming)) {
+    const merged = { ...incoming, ...existing };
+    for (const key of Object.keys(incoming)) if (key in existing) merged[key] = mergeImported(existing[key], incoming[key]);
+    return merged;
+  }
+  return existing === undefined ? incoming : existing;
+}
+
+async function ensureStudentRole(userId) {
+  await pool.query("INSERT INTO mina_user_roles (user_id, role) VALUES ($1, 'student') ON CONFLICT (user_id) DO NOTHING", [userId]);
+}
+
+async function getAccountRecords(userId) {
+  const result = await pool.query("SELECT record_type, data FROM mina_user_records WHERE user_id = $1", [userId]);
+  return Object.fromEntries(result.rows.map(row => [row.record_type, row.data]));
+}
+
+const app = express();
+app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
+app.use(clerkMiddleware(request => ({
+  publishableKey: publishableKeyFromHost(getClerkProxyHost(request) || "", process.env.CLERK_PUBLISHABLE_KEY),
+})));
+
+app.get("/api/account/data", requireAuth, async (request, response) => {
+  try {
+    await ensureStudentRole(request.userId);
+    const [records, roleResult] = await Promise.all([
+      getAccountRecords(request.userId),
+      pool.query("SELECT role FROM mina_user_roles WHERE user_id = $1", [request.userId]),
+    ]);
+    sendJson(response, 200, { records, role: roleResult.rows[0]?.role || "student" });
+  } catch {
+    sendError(response, 500, "ACCOUNT_STORAGE_ERROR", "Your account data could not be loaded.");
+  }
+});
+
+app.get("/api/educator/access", requireAuth, requireRole("educator", "admin"), (_request, response) => {
+  sendJson(response, 200, { authorized: true });
+});
+
+app.put("/api/account/data/:type", requireAuth, async (request, response) => {
+  const type = request.params.type;
+  if (!allowedRecordTypes.has(type)) {
+    sendError(response, 400, "INVALID_RECORD_TYPE", "That account data category is not supported.");
+    return;
+  }
+  if (!isSameOrigin(request)) {
+    sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed.");
+    return;
+  }
+  try {
+    const input = await readJsonBody(request, 1_048_576);
+    const json = JSON.stringify(input?.data);
+    if (!input || !input.data || typeof input.data !== "object" || !json || Buffer.byteLength(json) > 900_000) {
+      sendError(response, 400, "INVALID_ACCOUNT_DATA", "Send a supported JSON object or list under 900 KB.");
+      return;
+    }
+    await ensureStudentRole(request.userId);
+    await pool.query("INSERT INTO mina_user_records (user_id, record_type, data) VALUES ($1, $2, $3::jsonb) ON CONFLICT (user_id, record_type) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()", [request.userId, type, json]);
+    sendJson(response, 200, { saved: true });
+  } catch (error) {
+    sendError(response, error.statusCode || 500, error.statusCode ? "INVALID_REQUEST" : "ACCOUNT_STORAGE_ERROR", error.statusCode ? error.message : "Your data could not be saved.");
+  }
+});
+
+app.post("/api/account/import", requireAuth, async (request, response) => {
+  if (!isSameOrigin(request)) {
+    sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed.");
+    return;
+  }
+  try {
+    const input = await readJsonBody(request, 1_048_576);
+    const records = input?.records;
+    if (!records || typeof records !== "object" || Array.isArray(records) || Object.keys(records).some(type => !["conversations", "learning"].includes(type))) {
+      sendError(response, 400, "INVALID_IMPORT", "Choose valid browser study data to import.");
+      return;
+    }
+    await ensureStudentRole(request.userId);
+    for (const [type, incoming] of Object.entries(records)) {
+      const current = await pool.query("SELECT data FROM mina_user_records WHERE user_id = $1 AND record_type = $2", [request.userId, type]);
+      const merged = mergeImported(current.rows[0]?.data, incoming);
+      const json = JSON.stringify(merged);
+      if (Buffer.byteLength(json) > 900_000) throw Object.assign(new Error("The imported data is too large."), { statusCode: 413 });
+      await pool.query("INSERT INTO mina_user_records (user_id, record_type, data) VALUES ($1, $2, $3::jsonb) ON CONFLICT (user_id, record_type) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()", [request.userId, type, json]);
+    }
+    sendJson(response, 200, { imported: true, records: await getAccountRecords(request.userId) });
+  } catch (error) {
+    sendError(response, error.statusCode || 500, error.statusCode ? "INVALID_IMPORT" : "ACCOUNT_STORAGE_ERROR", error.statusCode ? error.message : "Browser data could not be imported.");
+  }
+});
+
+app.delete("/api/account/data", requireAuth, async (request, response) => {
+  if (!isSameOrigin(request)) {
+    sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed.");
+    return;
+  }
+  try {
+    await pool.query("DELETE FROM mina_user_records WHERE user_id = $1", [request.userId]);
+    sendJson(response, 200, { deleted: true });
+  } catch {
+    sendError(response, 500, "ACCOUNT_STORAGE_ERROR", "Your saved data could not be deleted.");
+  }
+});
+
+app.use(async (request, response) => {
   const requestUrl = new URL(request.url || "/", "http://localhost");
   const pathname = requestUrl.pathname;
 
@@ -462,6 +620,6 @@ const server = createServer(async (request, response) => {
   }
 });
 
-server.listen(port, host, () => {
+app.listen(port, host, () => {
   console.log(`Mina Teach is listening on ${host}:${port}`);
 });

@@ -33,3 +33,18 @@ Restart the app after updating the connection.
 Keep these files when extending the project. The prototypes are not yet joined
 to the home page; integrate them carefully rather than deleting or replacing
 existing work.
+
+## Student accounts and saved data
+
+- `/account/` provides MINA TEACH AI sign-in, account settings, browser-data
+  import, download, and deletion controls.
+- Clerk sessions are checked by the server before account data is read or
+  changed. Do not add bearer tokens to browser requests.
+- Signed-in conversations, learning records, and preferences are stored in the
+  Replit PostgreSQL development database and scoped to the Clerk user ID.
+- Existing browser data remains local until the student explicitly imports it.
+  Deleting saved Mina Teach data removes the account copy and the two supported
+  browser copies; it does not delete the Clerk sign-in account.
+- All users receive the `student` role by default. There is no self-service
+  role elevation; do not enable educator management until the owner identifies
+  the first trusted educator or administrator.

@@ -18,6 +18,7 @@
     "General Knowledge": ["Study skills","Research and evidence","Critical thinking","Review"]
   };
   const state = load();
+  let accountSyncEnabled = false;
   const $ = (id) => document.getElementById(id);
   const grade = $("grade"), stream = $("stream"), dialog = $("lesson-dialog");
   let current = null;
@@ -28,7 +29,13 @@
       return { settings: parsed.settings || { grade: "9", stream: "natural" }, completed: parsed.completed || [], saved: parsed.saved || [], tasks: parsed.tasks || [] };
     } catch { return { settings: { grade: "9", stream: "natural" }, completed: [], saved: [], tasks: [] }; }
   }
-  function persist() { localStorage.setItem(KEY, JSON.stringify(state)); }
+  function persist() {
+    localStorage.setItem(KEY, JSON.stringify(state));
+    if (accountSyncEnabled) fetch("/api/account/data/learning", {
+      method: "PUT", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data: state }),
+    }).catch(() => {});
+  }
   function scopeKey() { return `${grade.value}:${stream.value}`; }
   function visibleSubjects() {
     const social = new Set(["English","Afaan Oromoo","Amharic","Geography","History","Economics","Civics and Ethics","ICT","Aptitude","Environmental Science","General Knowledge"]);
@@ -127,4 +134,21 @@
   stream.value = state.settings.stream || "natural";
   grade.addEventListener("change", updateScope); stream.addEventListener("change", updateScope);
   renderSubjects(); renderTasks(); renderSaved();
+  fetch("/api/account/data", { credentials: "same-origin" }).then(async response => {
+    if (!response.ok) return;
+    const result = await response.json();
+    if (result.records?.learning && typeof result.records.learning === "object") {
+      const remote = result.records.learning;
+      state.completed = [...new Set([...(remote.completed || []), ...state.completed])];
+      const savedByKey = new Map([...(remote.saved || []), ...state.saved].map(item => [item.key, item]));
+      const tasksByText = new Map([...(remote.tasks || []), ...state.tasks].map(item => [item.text, item]));
+      state.saved = [...savedByKey.values()];
+      state.tasks = [...tasksByText.values()];
+      state.settings = { ...(remote.settings || {}), ...state.settings };
+      grade.value = String(state.settings.grade || "9");
+      stream.value = state.settings.stream || "natural";
+    }
+    accountSyncEnabled = true;
+    persist(); renderSubjects(); renderTasks(); renderSaved();
+  }).catch(() => {});
 })();

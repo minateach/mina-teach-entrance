@@ -25,6 +25,7 @@ let isLoading = false;
 let retryMessage = "";
 let retryError = "";
 let providerConfigured = null;
+let accountSyncEnabled = false;
 
 function readConversations() {
   try {
@@ -53,6 +54,31 @@ function persistConversations() {
   }
   renderHistory();
   renderStorageNote();
+  if (accountSyncEnabled) {
+    fetch("/api/account/data/conversations", {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data: conversations }),
+    }).catch(() => {});
+  }
+}
+
+async function syncAccountConversations() {
+  try {
+    const response = await fetch("/api/account/data", { credentials: "same-origin" });
+    if (!response.ok) return;
+    const { records } = await response.json();
+    accountSyncEnabled = true;
+    const merged = new Map((records?.conversations || []).map(item => [item.id, item]));
+    conversations.forEach(item => merged.set(item.id, item));
+    conversations = [...merged.values()].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
+    persistConversations();
+    if (elements.storageNote) elements.storageNote.textContent = "Sessions sync to your account and stay on this device.";
+  } catch {
+    accountSyncEnabled = false;
+  }
 }
 
 function makeId() {
@@ -573,3 +599,4 @@ renderStorageNote();
 renderConversation();
 updateSendButton();
 checkAssistantStatus();
+syncAccountConversations();
