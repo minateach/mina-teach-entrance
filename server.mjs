@@ -945,18 +945,50 @@ app.post("/api/exams", requireAuth, async (request, response) => {
   try {
     if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
     const input = await readJsonBody(request);
-    const { where, params } = questionFilters(input || {});
+    if (input?.mode && !["practice", "entrance"].includes(input.mode)) { sendError(response, 400, "INVALID_EXAM_MODE", "Choose practice or entrance exam mode."); return; }
+    const mode = input?.mode === "entrance" ? "entrance" : "practice";
+    const questionCount = mode === "entrance" ? 60 : Number(input?.questionCount || 60);
+    if (![10, 20, 30, 60].includes(questionCount)) { sendError(response, 400, "INVALID_QUESTION_COUNT", "Choose 10, 20, 30, or 60 questions."); return; }
+    const { where, params } = questionFilters(mode === "entrance" ? {} : input || {});
     const available = await pool.query(`SELECT COUNT(*)::int AS count FROM mina_questions ${where}`, params);
     const count = available.rows[0].count;
-    if (count < 60) { sendError(response, 409, "QUESTION_BANK_INSUFFICIENT", `A 60-question exam requires at least 60 approved matches; only ${count} are available.`); return; }
-    const total = 60;
-    const selected = await pool.query(`SELECT id,grade,stream,subject,chapter,prompt,choices,difficulty,source_label,source_kind FROM mina_questions ${where} ORDER BY random() LIMIT $${params.length + 1}`, [...params, total]);
+    if (count < questionCount) { sendError(response, 409, "QUESTION_BANK_INSUFFICIENT", `This session requires ${questionCount} approved matches; only ${count} are available.`); return; }
+    const total = questionCount;
+    const selectionSql = mode === "entrance"
+      ? `SELECT id,grade,stream,subject,chapter,prompt,choices,difficulty,source_label,source_kind FROM (SELECT id,grade,stream,subject,chapter,prompt,choices,difficulty,source_label,source_kind,ROW_NUMBER() OVER (PARTITION BY grade,subject ORDER BY random()) AS mix_rank FROM mina_questions ${where}) mixed ORDER BY mix_rank,random() LIMIT $${params.length + 1}`
+      : `SELECT id,grade,stream,subject,chapter,prompt,choices,difficulty,source_label,source_kind FROM mina_questions ${where} ORDER BY random() LIMIT $${params.length + 1}`;
+    const selected = await pool.query(selectionSql, [...params, total]);
     const ids = selected.rows.map(row => String(row.id));
-    const attempt = await pool.query("INSERT INTO mina_exam_attempts (user_id,grade,stream,subject,difficulty,question_ids,total,score) VALUES ($1,$2,$3,$4,$5,$6::bigint[],$7,0) RETURNING id,started_at", [request.userId, Number(input.grade), input.stream, input.subject || null, input.difficulty || null, ids, total]);
-    sendJson(response, 201, { attemptId: String(attempt.rows[0].id), startedAt: attempt.rows[0].started_at, total, availableCount: count, questions: selected.rows.map(publicQuestion), timerSeconds: 60 });
+    const grade = mode === "entrance" ? null : Number(input.grade);
+    const stream = mode === "entrance" ? null : input.stream;
+    const attempt = await pool.query("INSERT INTO mina_exam_attempts (user_id,mode,grade,stream,subject,difficulty,question_ids,total,score) VALUES ($1,$2,$3,$4,$5,$6,$7::bigint[],$8,0) RETURNING id,started_at", [request.userId, mode, grade, stream, mode === "entrance" ? null : input.subject || null, mode === "entrance" ? null : input.difficulty || null, ids, total]);
+    sendJson(response, 201, { attemptId: String(attempt.rows[0].id), startedAt: attempt.rows[0].started_at, mode, total, availableCount: count, questions: selected.rows.map(publicQuestion), timerSeconds: mode === "entrance" ? 60 : null });
   } catch (error) {
     sendError(response, error.statusCode || 400, "EXAM_START_FAILED", error.message || "The practice exam could not be started.");
   }
+});
+
+app.post("/api/exams/:id/answer", requireAuth, async (request, response) => {
+  try {
+    if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
+    const attempt = await pool.query("SELECT mode,question_ids,answers,submitted_at FROM mina_exam_attempts WHERE id=$1 AND user_id=$2", [request.params.id, request.userId]);
+    if (!attempt.rowCount) { sendError(response, 404, "ATTEMPT_NOT_FOUND", "This practice session was not found."); return; }
+    if (attempt.rows[0].mode !== "practice") { sendError(response, 409, "NOT_PRACTICE_MODE", "Immediate feedback is only available in practice mode."); return; }
+    if (attempt.rows[0].submitted_at) { sendError(response, 409, "ATTEMPT_SUBMITTED", "This practice session is already complete."); return; }
+    const input = await readJsonBody(request);
+    const id = String(input?.questionId || "");
+    if (!attempt.rows[0].question_ids.map(String).includes(id) || !Number.isInteger(input?.choice) || input.choice < 0 || input.choice > 3) {
+      sendError(response, 400, "INVALID_ANSWER", "Choose one of the four options for a question in this session."); return;
+    }
+    const result = await pool.query("SELECT id,grade,stream,subject,chapter,prompt,choices,correct_index,explanation,difficulty,source_label,source_kind FROM mina_questions WHERE id=$1 AND review_status='approved' AND source_kind<>'ai_generated'", [id]);
+    if (!result.rowCount) { sendError(response, 404, "QUESTION_NOT_AVAILABLE", "This reviewed question is no longer available."); return; }
+    const question = result.rows[0], answers = { ...(attempt.rows[0].answers || {}), [id]: input.choice };
+    const all = await pool.query("SELECT id,correct_index FROM mina_questions WHERE id=ANY($1::bigint[]) AND review_status='approved' AND source_kind<>'ai_generated'", [attempt.rows[0].question_ids]);
+    const score = all.rows.filter(row => Number.isInteger(answers[String(row.id)]) && answers[String(row.id)] === row.correct_index).length;
+    const saved = await pool.query("UPDATE mina_exam_attempts SET answers=$1::jsonb,score=$2 WHERE id=$3 AND user_id=$4 AND submitted_at IS NULL", [JSON.stringify(answers), score, request.params.id, request.userId]);
+    if (!saved.rowCount) { sendError(response, 409, "ATTEMPT_SUBMITTED", "This practice session is already complete."); return; }
+    sendJson(response, 200, { questionId: id, selectedIndex: input.choice, correctIndex: question.correct_index, correctAnswer: question.choices[question.correct_index], explanation: question.explanation, isCorrect: input.choice === question.correct_index, score });
+  } catch { sendError(response, 500, "PRACTICE_ANSWER_FAILED", "The answer could not be saved."); }
 });
 
 app.post("/api/exams/:id/submit", requireAuth, async (request, response) => {
@@ -999,7 +1031,7 @@ app.post("/api/exams/:id/submit", requireAuth, async (request, response) => {
 
 app.get("/api/exams/history", requireAuth, async (request, response) => {
   try {
-    const result = await pool.query("SELECT id,grade,stream,subject,difficulty,score,total,started_at,submitted_at FROM mina_exam_attempts WHERE user_id=$1 ORDER BY started_at DESC LIMIT 100", [request.userId]);
+    const result = await pool.query("SELECT id,mode,grade,stream,subject,difficulty,score,total,started_at,submitted_at FROM mina_exam_attempts WHERE user_id=$1 ORDER BY started_at DESC LIMIT 100", [request.userId]);
     sendJson(response, 200, { attempts: result.rows });
   } catch { sendError(response, 500, "EXAM_HISTORY_FAILED", "Exam history could not be loaded."); }
 });

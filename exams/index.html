@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="/assistant/app-icon-180.png">
   <link rel="stylesheet" href="/exams/styles.css">
   <style>
-    .question-nav{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}.question-number{min-width:40px;padding:8px;background:#edf2fb;color:#264875}.question-number.answered{background:#e2f5e9;color:#17683a}.question-number.current{outline:2px solid #1d4c9c}.question-number.current.answered{background:#c9e8d3}
+    .question-nav{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}.question-number{min-width:40px;padding:8px;background:#edf2fb;color:#264875}.question-number.answered{background:#e2f5e9;color:#17683a}.question-number.incorrect{background:#fee8e7;color:#9b1c18}.question-number.current{outline:2px solid #1d4c9c}.question-number.current.answered{background:#c9e8d3}
   </style>
   <title>MINA TEACH AI | Practice exams</title>
 </head>
@@ -20,7 +20,8 @@
     <section class="layout">
       <section class="panel" id="setup">
         <h2>Choose a practice set</h2>
-        <div class="filters">
+        <div class="filters"><label>Mode<select id="mode"><option value="practice">Practice with feedback</option><option value="entrance">Entrance mock exam</option></select></label><label id="question-count-wrap">Practice questions<select id="question-count"><option value="10">10 questions</option><option value="20">20 questions</option><option value="30">30 questions</option><option value="60">60 questions</option></select></label></div>
+        <div class="filters" id="subject-filters">
           <label>Grade<select id="grade"><option>9</option><option>10</option><option>11</option><option>12</option></select></label>
           <label>Stream<select id="stream"><option value="natural">Natural Science</option><option value="social">Social Science</option></select></label>
           <label>Subject<select id="subject"><option value="">All subjects</option><option>Mathematics</option><option>Physics</option><option>Chemistry</option><option>Biology</option><option>English</option><option>Afaan Oromoo</option><option>Amharic</option><option>Geography</option><option>History</option><option>Economics</option><option>Civics and Ethics</option><option>ICT</option><option>Aptitude</option><option>Environmental Science</option><option>General Knowledge</option><option>Basic Technical Drawing</option><option>General Business</option><option>Health and Physical Education</option></select></label>
@@ -28,17 +29,18 @@
           <label>Difficulty<select id="difficulty"><option value="">All levels</option><option value="easy">Easy</option><option value="medium">Medium</option><option value="hard">Hard</option></select></label>
         </div>
         <p id="bank-status" class="status" role="status">Checking reviewed question count…</p>
-        <button id="start-exam" disabled>Start practice exam</button>
-          <p class="small">Practice exams start only when 60 reviewed questions match your grade, stream, subject, and filters.</p>
+        <button id="start-exam" disabled>Start practice</button>
+        <p id="count-guidance" class="small">Practice sessions require enough reviewed questions for the selected length.</p>
       </section>
       <section class="panel" id="exam" hidden>
-        <div class="exam-meta"><span id="progress"></span><span>Question time left: <strong id="timer" aria-live="polite">60</strong>s</span></div>
+        <div class="exam-meta"><span id="progress"></span><span id="timer-meta">Question: <strong id="timer" aria-live="polite">60</strong>s left</span><span id="exam-time-meta" hidden>Exam: <strong id="exam-timer" aria-live="polite">60:00</strong> left</span></div>
         <div id="question-nav" class="question-nav" aria-label="Question navigation"></div>
-        <h2 id="question"></h2><p id="question-source" class="small"></p><div id="choices"></div>
+        <h2 id="question"></h2><p id="question-source" class="small"></p><div id="choices"></div><p id="answer-feedback" class="status" role="status" hidden></p>
         <button id="bookmark" class="secondary">☆ Save question</button>
         <div class="exam-navigation" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
           <button id="previous" class="secondary" type="button" disabled>Previous</button>
           <button id="next" type="button">Next question</button>
+          <button id="retry-wrong" class="secondary" type="button" hidden>Retry incorrect</button>
           <button id="submit-exam" type="button" hidden>Submit exam</button>
         </div>
       </section>
