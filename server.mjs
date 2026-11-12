@@ -365,6 +365,8 @@ function publicFilePath(pathname) {
   if (pathname === "/learning" || pathname === "/learning/") {
     return "learning/index.html";
   }
+  if (pathname === "/exams" || pathname === "/exams/") return "exams/index.html";
+  if (new Set(["/exams/app.js", "/exams/styles.css"]).has(pathname)) return pathname.slice(1);
   if (pathname === "/account" || pathname === "/account/" || pathname.startsWith("/account/sign-in") || pathname.startsWith("/account/sign-up")) {
     return "account-dist/index.html";
   }
@@ -496,6 +498,16 @@ app.get("/api/account/data", requireAuth, async (request, response) => {
   }
 });
 
+app.get("/api/account/status", async (request, response) => {
+  const userId = getAuth(request)?.userId;
+  if (!userId) { sendJson(response, 200, { signedIn: false }); return; }
+  try {
+    await ensureStudentRole(userId);
+    const result = await pool.query("SELECT role FROM mina_user_roles WHERE user_id=$1", [userId]);
+    sendJson(response, 200, { signedIn: true, role: result.rows[0]?.role || "student" });
+  } catch { sendJson(response, 200, { signedIn: true, role: "student" }); }
+});
+
 app.get("/api/educator/access", requireAuth, requireRole("educator", "admin"), (_request, response) => {
   sendJson(response, 200, { authorized: true });
 });
@@ -562,6 +574,163 @@ app.delete("/api/account/data", requireAuth, async (request, response) => {
   } catch {
     sendError(response, 500, "ACCOUNT_STORAGE_ERROR", "Your saved data could not be deleted.");
   }
+});
+
+const questionStreams = new Set(["natural", "social", "common"]);
+const difficulties = new Set(["easy", "medium", "hard"]);
+const sourceKinds = new Set(["textbook", "teacher_authored", "open_resource", "ai_generated", "legacy"]);
+function questionFilters(query, approvedOnly = true) {
+  const clauses = approvedOnly ? ["review_status = 'approved'", "source_kind <> 'ai_generated'"] : [];
+  const params = [];
+  const add = (column, value) => { params.push(value); clauses.push(`${column} = $${params.length}`); };
+  if (query.grade !== undefined) {
+    const grade = Number(query.grade);
+    if (![9, 10, 11, 12].includes(grade)) throw new Error("Choose Grade 9, 10, 11, or 12.");
+    add("grade", grade);
+  }
+  if (query.stream) {
+    if (!questionStreams.has(query.stream)) throw new Error("Choose Natural Science or Social Science.");
+    add("stream", query.stream);
+  }
+  if (query.subject) add("subject", String(query.subject).slice(0, 80));
+  if (query.difficulty) {
+    if (!difficulties.has(query.difficulty)) throw new Error("Choose an available difficulty.");
+    add("difficulty", query.difficulty);
+  }
+  return { where: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", params };
+}
+function publicQuestion(row) {
+  return { id: String(row.id), grade: row.grade, stream: row.stream, subject: row.subject, chapter: row.chapter, prompt: row.prompt, choices: row.choices, difficulty: row.difficulty, sourceLabel: row.source_label, sourceKind: row.source_kind || "teacher_authored" };
+}
+
+app.get("/api/questions", async (request, response) => {
+  try {
+    const { where, params } = questionFilters(request.query);
+    const [count, result] = await Promise.all([
+      pool.query(`SELECT COUNT(*)::int AS count FROM mina_questions ${where}`, params),
+      pool.query(`SELECT id,grade,stream,subject,chapter,prompt,choices,difficulty,source_label,source_kind FROM mina_questions ${where} ORDER BY id LIMIT 200`, params),
+    ]);
+    sendJson(response, 200, { count: count.rows[0].count, questions: result.rows.map(publicQuestion), official: false });
+  } catch (error) {
+    sendError(response, 400, "INVALID_FILTER", error.message);
+  }
+});
+
+app.get("/api/questions/manage", requireAuth, requireRole("educator", "admin"), async (_request, response) => {
+  try {
+    const result = await pool.query("SELECT id,grade,stream,subject,chapter,prompt,choices,correct_index,explanation,difficulty,source_label,source_url,source_kind,review_status FROM mina_questions ORDER BY created_at DESC LIMIT 300");
+    sendJson(response, 200, { questions: result.rows });
+  } catch { sendError(response, 500, "QUESTION_MANAGEMENT_FAILED", "Questions could not be loaded."); }
+});
+
+app.post("/api/exams", requireAuth, async (request, response) => {
+  try {
+    if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
+    const input = await readJsonBody(request);
+    const { where, params } = questionFilters(input || {});
+    const available = await pool.query(`SELECT COUNT(*)::int AS count FROM mina_questions ${where}`, params);
+    const count = available.rows[0].count;
+    if (!count) { sendError(response, 409, "QUESTION_BANK_EMPTY", "No reviewed questions match these choices yet."); return; }
+    const total = Math.min(60, count);
+    const selected = await pool.query(`SELECT id,grade,stream,subject,chapter,prompt,choices,difficulty,source_label,source_kind FROM mina_questions ${where} ORDER BY random() LIMIT $${params.length + 1}`, [...params, total]);
+    const ids = selected.rows.map(row => String(row.id));
+    const attempt = await pool.query("INSERT INTO mina_exam_attempts (user_id,grade,stream,subject,difficulty,question_ids,total,score) VALUES ($1,$2,$3,$4,$5,$6::bigint[],$7,0) RETURNING id,started_at", [request.userId, Number(input.grade), input.stream, input.subject || null, input.difficulty || null, ids, total]);
+    sendJson(response, 201, { attemptId: String(attempt.rows[0].id), startedAt: attempt.rows[0].started_at, total, availableCount: count, questions: selected.rows.map(publicQuestion), timerSeconds: 60 });
+  } catch (error) {
+    sendError(response, error.statusCode || 400, "EXAM_START_FAILED", error.message || "The practice exam could not be started.");
+  }
+});
+
+app.post("/api/exams/:id/submit", requireAuth, async (request, response) => {
+  try {
+    if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
+    const attempt = await pool.query("SELECT * FROM mina_exam_attempts WHERE id = $1 AND user_id = $2", [request.params.id, request.userId]);
+    if (!attempt.rowCount) { sendError(response, 404, "ATTEMPT_NOT_FOUND", "This exam attempt was not found."); return; }
+    if (attempt.rows[0].submitted_at) { sendError(response, 409, "ALREADY_SUBMITTED", "This exam attempt has already been submitted."); return; }
+    const input = await readJsonBody(request);
+    const answers = input?.answers;
+    if (!answers || typeof answers !== "object" || Array.isArray(answers)) { sendError(response, 400, "INVALID_ANSWERS", "Submit a choice for each question."); return; }
+    const ids = attempt.rows[0].question_ids.map(String);
+    const rows = await pool.query("SELECT id,grade,stream,subject,chapter,prompt,choices,correct_index,explanation,difficulty,source_label,source_kind FROM mina_questions WHERE id = ANY($1::bigint[])", [ids]);
+    const byId = new Map(rows.rows.map(row => [String(row.id), row]));
+    let score = 0;
+    const review = ids.map(id => {
+      const question = byId.get(id);
+      const choice = Number.isInteger(answers[id]) && answers[id] >= 0 && answers[id] < 4 ? answers[id] : null;
+      const correct = choice === question.correct_index;
+      if (correct) score += 1;
+      return { ...publicQuestion(question), selectedIndex: choice, correctIndex: question.correct_index, explanation: question.explanation, isCorrect: correct };
+    });
+    await pool.query("UPDATE mina_exam_attempts SET answers=$1::jsonb,score=$2,submitted_at=NOW() WHERE id=$3 AND user_id=$4", [JSON.stringify(answers), score, request.params.id, request.userId]);
+    sendJson(response, 200, { score, total: ids.length, percentage: Math.round(score / ids.length * 100), review });
+  } catch {
+    sendError(response, 500, "EXAM_SUBMIT_FAILED", "The result could not be saved.");
+  }
+});
+
+app.get("/api/exams/history", requireAuth, async (request, response) => {
+  try {
+    const result = await pool.query("SELECT id,grade,stream,subject,difficulty,score,total,started_at,submitted_at FROM mina_exam_attempts WHERE user_id=$1 ORDER BY started_at DESC LIMIT 100", [request.userId]);
+    sendJson(response, 200, { attempts: result.rows });
+  } catch { sendError(response, 500, "EXAM_HISTORY_FAILED", "Exam history could not be loaded."); }
+});
+
+app.post("/api/questions", requireAuth, requireRole("educator", "admin"), async (request, response) => {
+  try {
+    if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
+    const input = await readJsonBody(request);
+    if (![9,10,11,12].includes(Number(input.grade)) || !questionStreams.has(input.stream) || !difficulties.has(input.difficulty) || !sourceKinds.has(input.sourceKind || "teacher_authored") || !Array.isArray(input.choices) || input.choices.length !== 4 || !Number.isInteger(input.correctIndex) || input.correctIndex < 0 || input.correctIndex > 3 || !input.prompt || !input.explanation || !input.sourceLabel) {
+      sendError(response, 400, "INVALID_QUESTION", "Provide grade, stream, subject, chapter, four choices, answer, explanation, difficulty, and source.");
+      return;
+    }
+    const result = await pool.query("INSERT INTO mina_questions (grade,stream,subject,chapter,prompt,choices,correct_index,explanation,difficulty,source_label,source_url,source_kind,review_status,created_by,updated_by) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,'draft',$13,$13) RETURNING id,review_status", [Number(input.grade), input.stream, String(input.subject).slice(0,80), String(input.chapter).slice(0,120), String(input.prompt).slice(0,1000), JSON.stringify(input.choices.map(value=>String(value).slice(0,300))), input.correctIndex, String(input.explanation).slice(0,2000), input.difficulty, String(input.sourceLabel).slice(0,300), input.sourceUrl ? String(input.sourceUrl).slice(0,500) : null, input.sourceKind || "teacher_authored", request.userId]);
+    sendJson(response, 201, { questionId: String(result.rows[0].id), reviewStatus: "draft" });
+  } catch { sendError(response, 500, "QUESTION_SAVE_FAILED", "The question could not be saved."); }
+});
+
+app.put("/api/questions/:id", requireAuth, requireRole("educator", "admin"), async (request, response) => {
+  try {
+    if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
+    const input = await readJsonBody(request);
+    if (![9,10,11,12].includes(Number(input.grade)) || !questionStreams.has(input.stream) || !difficulties.has(input.difficulty) || !sourceKinds.has(input.sourceKind || "teacher_authored") || !Array.isArray(input.choices) || input.choices.length !== 4 || !Number.isInteger(input.correctIndex) || input.correctIndex < 0 || input.correctIndex > 3 || !input.prompt || !input.explanation || !input.sourceLabel) {
+      sendError(response, 400, "INVALID_QUESTION", "Question fields are incomplete or invalid."); return;
+    }
+    const result = await pool.query("UPDATE mina_questions SET grade=$1,stream=$2,subject=$3,chapter=$4,prompt=$5,choices=$6::jsonb,correct_index=$7,explanation=$8,difficulty=$9,source_label=$10,source_url=$11,source_kind=$12,review_status='draft',reviewed_by=NULL,reviewed_at=NULL,updated_by=$13,updated_at=NOW() WHERE id=$14 RETURNING id", [Number(input.grade),input.stream,String(input.subject).slice(0,80),String(input.chapter).slice(0,120),String(input.prompt).slice(0,1000),JSON.stringify(input.choices.map(value=>String(value).slice(0,300))),input.correctIndex,String(input.explanation).slice(0,2000),input.difficulty,String(input.sourceLabel).slice(0,300),input.sourceUrl?String(input.sourceUrl).slice(0,500):null,input.sourceKind || "teacher_authored",request.userId,request.params.id]);
+    if (!result.rowCount) { sendError(response,404,"QUESTION_NOT_FOUND","Question not found."); return; }
+    sendJson(response,200,{updated:true,reviewStatus:"draft"});
+  } catch { sendError(response,500,"QUESTION_UPDATE_FAILED","The question could not be updated."); }
+});
+
+app.post("/api/questions/:id/review", requireAuth, requireRole("admin"), async (request, response) => {
+  try {
+    if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
+    const input = await readJsonBody(request);
+    if (!["approved", "rejected"].includes(input.status)) { sendError(response, 400, "INVALID_REVIEW", "Choose approved or rejected."); return; }
+    const result = await pool.query("UPDATE mina_questions SET review_status=$1,reviewed_by=$2,reviewed_at=NOW(),updated_by=$2,updated_at=NOW() WHERE id=$3 RETURNING id", [input.status, request.userId, request.params.id]);
+    if (!result.rowCount) { sendError(response, 404, "QUESTION_NOT_FOUND", "Question not found."); return; }
+    sendJson(response, 200, { reviewed: true, status: input.status });
+  } catch { sendError(response, 500, "REVIEW_FAILED", "The review status could not be saved."); }
+});
+
+app.get("/api/questions/bookmarks", requireAuth, async (request, response) => {
+  try {
+    const result = await pool.query("SELECT q.id,q.grade,q.stream,q.subject,q.chapter,q.prompt,q.choices,q.difficulty,q.source_label FROM mina_question_bookmarks b JOIN mina_questions q ON q.id=b.question_id WHERE b.user_id=$1 ORDER BY b.created_at DESC LIMIT 200", [request.userId]);
+    sendJson(response, 200, { questions: result.rows.map(publicQuestion) });
+  } catch { sendError(response, 500, "BOOKMARKS_FAILED", "Saved questions could not be loaded."); }
+});
+
+app.put("/api/questions/:id/bookmark", requireAuth, async (request, response) => {
+  if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
+  try {
+    await pool.query("INSERT INTO mina_question_bookmarks (user_id,question_id) SELECT $1,id FROM mina_questions WHERE id=$2 AND review_status='approved' ON CONFLICT DO NOTHING", [request.userId, request.params.id]);
+    sendJson(response, 200, { saved: true });
+  } catch { sendError(response, 400, "BOOKMARK_FAILED", "This question could not be saved."); }
+});
+
+app.delete("/api/questions/:id/bookmark", requireAuth, async (request, response) => {
+  if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
+  try { await pool.query("DELETE FROM mina_question_bookmarks WHERE user_id=$1 AND question_id=$2", [request.userId, request.params.id]); sendJson(response, 200, { deleted: true }); }
+  catch { sendError(response, 500, "BOOKMARK_FAILED", "This saved question could not be removed."); }
 });
 
 app.use(async (request, response) => {
