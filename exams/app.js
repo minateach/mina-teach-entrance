@@ -98,6 +98,8 @@
       event.currentTarget.reset();await loadEducator();
     }catch(e){$("import-status").textContent=e.message==="Unexpected end of JSON input"?"The selected file is not valid JSON.":e.status===403?"Educator access has not been assigned to this account.":e.message;}
   });
+  const initialFilters=new URLSearchParams(location.search);
+  for(const id of ["grade","stream","subject","topic"]){const value=initialFilters.get(id);if(value&&$(id)&&[...$(id).options||[]].some(option=>option.value===value)||id==="topic"&&value)$(id).value=value;}
   ["grade","stream","subject","difficulty"].forEach(id=>$(id).addEventListener("change",updateCount));
   $("topic").addEventListener("input",()=>{clearTimeout(window.topicFilterTimer);window.topicFilterTimer=setTimeout(updateCount,250);});
   $("start-exam").onclick=async()=>{

@@ -73,6 +73,28 @@
           <p id="list-status" role="status"></p>
         </section>
       </section>
+      <section class="panel roles-panel">
+        <div class="section-heading"><div><p class="eyebrow">LEARNING LIBRARY</p><h2>Lesson authoring and review</h2></div></div>
+        <p class="muted">Lessons are drafts until a reviewer publishes them. Add source-backed material in English, Afaan Oromoo, or Amharic.</p>
+        <form id="lesson-form">
+          <div class="form-grid">
+            <label>Grade<select name="grade"><option>9</option><option>10</option><option>11</option><option>12</option></select></label>
+            <label>Stream<select name="stream"><option value="common">Common</option><option value="natural">Natural Science</option><option value="social">Social Science</option></select></label>
+            <label>Subject<input name="subject" required maxlength="80"></label>
+            <label>Chapter<input name="chapter" required maxlength="120"></label>
+            <label>Lesson title<input name="title" required maxlength="180"></label>
+            <label>Language<select name="language"><option value="en">English</option><option value="om">Afaan Oromoo</option><option value="am">Amharic</option></select></label>
+          </div>
+          <label>Lesson content<textarea name="content" rows="6" maxlength="20000" required></textarea></label>
+          <label>Examples, one per line<textarea name="examples" rows="3"></textarea></label>
+          <label>Important notes, one per line<textarea name="keyPoints" rows="3"></textarea></label>
+          <div class="form-grid"><label>Source label<input name="sourceLabel" required maxlength="300"></label><label>Source URL<input name="sourceUrl" type="url" maxlength="500"></label></div>
+          <div class="actions"><button type="submit">Save lesson draft</button><button type="button" class="secondary" id="cancel-lesson-edit" hidden>Cancel edit</button></div>
+          <p id="lesson-form-status" role="status"></p>
+        </form>
+        <div id="lesson-admin-list" class="question-list"></div>
+        <p id="lesson-admin-status" role="status"></p>
+      </section>
       <section id="roles-panel" class="panel roles-panel" hidden>
         <div class="section-heading"><div><p class="eyebrow">ACCESS CONTROL</p><h2>Account roles</h2></div></div>
         <p class="muted">Only administrators can change roles. Accounts must sign in once before they can be assigned. Do not share passwords.</p>

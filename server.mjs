@@ -492,7 +492,7 @@ function publicFilePath(pathname) {
   const allowedTopLevelFiles = new Set(["/Index.html", "/Index.HTml"]);
   if (allowedTopLevelFiles.has(pathname)) return pathname.slice(1);
   if (pathname.startsWith("/assistant/")) return pathname.slice(1);
-  if (new Set(["/learning/app.js", "/learning/styles.css"]).has(pathname)) {
+  if (new Set(["/learning/app.js", "/learning/styles.css", "/learning/library.css"]).has(pathname)) {
     return pathname.slice(1);
   }
   return null;
@@ -789,6 +789,97 @@ function questionFilters(query, approvedOnly = true) {
 function publicQuestion(row) {
   return { id: String(row.id), grade: row.grade, stream: row.stream, subject: row.subject, chapter: row.chapter, prompt: row.prompt, choices: row.choices, difficulty: row.difficulty, sourceLabel: row.source_label, sourceKind: row.source_kind || "teacher_authored" };
 }
+
+function publicLesson(row) {
+  return {
+    id: String(row.id), grade: row.grade, stream: row.stream, subject: row.subject,
+    chapter: row.chapter, title: row.title, language: row.language, content: row.content,
+    examples: row.examples || [], keyPoints: row.key_points || [],
+    sourceLabel: row.source_label, sourceUrl: row.source_url || null,
+  };
+}
+function validLesson(input) {
+  if (!input || ![9, 10, 11, 12].includes(Number(input.grade)) ||
+      !questionStreams.has(input.stream) || !["en", "om", "am"].includes(input.language) ||
+      !String(input.subject || "").trim() || !String(input.chapter || "").trim() ||
+      !String(input.title || "").trim() || !String(input.content || "").trim() ||
+      !String(input.sourceLabel || "").trim()) return false;
+  if (![input.subject, input.chapter, input.title, input.content, input.sourceLabel].every(value => typeof value === "string")) return false;
+  if (input.subject.length > 80 || input.chapter.length > 120 || input.title.length > 180 ||
+      input.content.length > 20000 || input.sourceLabel.length > 300) return false;
+  if (!Array.isArray(input.examples || []) || (input.examples || []).length > 20 ||
+      !Array.isArray(input.keyPoints || []) || (input.keyPoints || []).length > 30) return false;
+  if (![...(input.examples || []), ...(input.keyPoints || [])].every(value => typeof value === "string" && value.length <= 1000)) return false;
+  if (input.sourceUrl) {
+    try { if (!["http:", "https:"].includes(new URL(input.sourceUrl).protocol)) return false; }
+    catch { return false; }
+  }
+  return true;
+}
+function lessonValues(input, userId) {
+  return [Number(input.grade), input.stream, input.subject.trim(), input.chapter.trim(), input.title.trim(),
+    input.language, input.content.trim(), JSON.stringify(input.examples || []), JSON.stringify(input.keyPoints || []),
+    input.sourceLabel.trim(), input.sourceUrl || null, userId];
+}
+
+app.get("/api/learning/lessons", async (request, response) => {
+  try {
+    const clauses = ["review_status='published'"], params = [];
+    for (const [key, column] of [["grade", "grade"], ["stream", "stream"], ["subject", "subject"], ["language", "language"]]) {
+      const value = request.query[key];
+      if (value === undefined || value === "") continue;
+      if (key === "grade" && ![9, 10, 11, 12].includes(Number(value))) throw new Error("Choose Grade 9, 10, 11, or 12.");
+      if (key === "stream" && !questionStreams.has(value)) throw new Error("Choose a valid stream.");
+      if (key === "language" && !["en", "om", "am"].includes(value)) throw new Error("Choose English, Afaan Oromoo, or Amharic.");
+      params.push(key === "grade" ? Number(value) : String(value).slice(0, 120));
+      clauses.push(key === "stream" && value !== "common" ? `${column} IN ($${params.length},'common')` : `${column}=$${params.length}`);
+    }
+    if (request.query.search) {
+      params.push(`%${String(request.query.search).trim().slice(0, 120)}%`);
+      clauses.push(`(title ILIKE $${params.length} OR chapter ILIKE $${params.length} OR subject ILIKE $${params.length} OR content ILIKE $${params.length})`);
+    }
+    const result = await pool.query(`SELECT id,grade,stream,subject,chapter,title,language,content,examples,key_points,source_label,source_url FROM mina_learning_lessons WHERE ${clauses.join(" AND ")} ORDER BY subject,chapter,title LIMIT 200`, params);
+    sendJson(response, 200, { lessons: result.rows.map(publicLesson) });
+  } catch (error) { sendError(response, 400, "LESSON_FILTER_INVALID", error.message || "Lessons could not be loaded."); }
+});
+app.get("/api/learning/lessons/manage", requireAuth, requireRole(...contentRoles), async (_request, response) => {
+  try {
+    const result = await pool.query("SELECT * FROM mina_learning_lessons ORDER BY created_at DESC LIMIT 300");
+    sendJson(response, 200, { lessons: result.rows.map(row => ({ ...publicLesson(row), reviewStatus: row.review_status })) });
+  } catch { sendError(response, 500, "LESSON_LOAD_FAILED", "Lesson drafts could not be loaded."); }
+});
+app.post("/api/learning/lessons", requireAuth, requireRole(...contentRoles), async (request, response) => {
+  try {
+    if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
+    const input = await readJsonBody(request);
+    if (!validLesson(input)) { sendError(response, 400, "INVALID_LESSON", "Complete the lesson fields and include a source label."); return; }
+    const result = await pool.query("INSERT INTO mina_learning_lessons (grade,stream,subject,chapter,title,language,content,examples,key_points,source_label,source_url,created_by,updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10,$11,$12,$12) RETURNING id,review_status", lessonValues(input, request.userId));
+    sendJson(response, 201, { id: String(result.rows[0].id), reviewStatus: result.rows[0].review_status });
+  } catch (error) {
+    sendError(response, error.code === "23505" ? 409 : 400, "LESSON_SAVE_FAILED", error.code === "23505" ? "A lesson with this grade, subject, chapter, title, and language already exists." : "The lesson could not be saved.");
+  }
+});
+app.put("/api/learning/lessons/:id", requireAuth, requireRole(...contentRoles), async (request, response) => {
+  try {
+    if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
+    const input = await readJsonBody(request);
+    if (!validLesson(input)) { sendError(response, 400, "INVALID_LESSON", "Complete the lesson fields and include a source label."); return; }
+    const values = lessonValues(input, request.userId);
+    const result = await pool.query("UPDATE mina_learning_lessons SET grade=$1,stream=$2,subject=$3,chapter=$4,title=$5,language=$6,content=$7,examples=$8::jsonb,key_points=$9::jsonb,source_label=$10,source_url=$11,updated_by=$12,review_status='draft',reviewed_by=NULL,reviewed_at=NULL,updated_at=NOW() WHERE id=$13 RETURNING id", [...values.slice(0, 11), request.userId, request.params.id]);
+    if (!result.rowCount) { sendError(response, 404, "LESSON_NOT_FOUND", "Lesson not found."); return; }
+    sendJson(response, 200, { updated: true, reviewStatus: "draft" });
+  } catch { sendError(response, 400, "LESSON_UPDATE_FAILED", "The lesson could not be updated."); }
+});
+app.post("/api/learning/lessons/:id/review", requireAuth, requireRole(...reviewRoles), async (request, response) => {
+  try {
+    if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
+    const input = await readJsonBody(request);
+    if (!["published", "rejected"].includes(input.status)) { sendError(response, 400, "INVALID_REVIEW", "Choose publish or reject."); return; }
+    const result = await pool.query("UPDATE mina_learning_lessons SET review_status=$1,reviewed_by=$2,reviewed_at=NOW(),updated_at=NOW() WHERE id=$3 RETURNING id", [input.status, request.userId, request.params.id]);
+    if (!result.rowCount) { sendError(response, 404, "LESSON_NOT_FOUND", "Lesson not found."); return; }
+    sendJson(response, 200, { status: input.status });
+  } catch { sendError(response, 500, "LESSON_REVIEW_FAILED", "The lesson review could not be saved."); }
+});
 
 app.get("/api/questions", async (request, response) => {
   try {

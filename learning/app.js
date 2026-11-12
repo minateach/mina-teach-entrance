@@ -15,12 +15,16 @@
     "ICT": ["Digital literacy","Computer systems","Networks","Information safety"],
     "Aptitude": ["Patterns","Logical reasoning","Problem solving","Data interpretation"],
     "Environmental Science": ["Ecosystems","Natural resources","Pollution","Conservation"],
-    "General Knowledge": ["Study skills","Research and evidence","Critical thinking","Review"]
+    "General Knowledge": ["Study skills","Research and evidence","Critical thinking","Review"],
+    "Basic Technical Drawing": ["Drawing instruments","Geometric construction","Orthographic drawing","Dimensioning"],
+    "General Business": ["Business concepts","Entrepreneurship","Marketing","Business finance"],
+    "Health and Physical Education": ["Personal health","Physical fitness","Sports skills","Safety"]
   };
   const state = load();
   let accountSyncEnabled = false;
   const $ = (id) => document.getElementById(id);
   const grade = $("grade"), stream = $("stream"), dialog = $("lesson-dialog");
+  const lessonSearch = $("lesson-search"), lessonSubject = $("lesson-subject-filter"), lessonLanguage = $("lesson-language");
   let current = null;
 
   function load() {
@@ -55,7 +59,8 @@
       text.append(title, meta);
       const button = document.createElement("button"); button.type = "button"; button.textContent = "View topics";
       button.addEventListener("click", () => showTopics(name, topics));
-      card.append(text, button); root.append(card);
+      const practice=document.createElement("a");practice.className="subject-practice";practice.textContent="Practice";practice.href=`/exams/?${new URLSearchParams({grade:grade.value,stream:stream.value,subject:name})}`;
+      card.append(text, button, practice); root.append(card);
     });
     updateStats();
   }
@@ -78,10 +83,48 @@
     current = lesson;
     $("lesson-subject").textContent = `GRADE ${grade.value} · ${lesson.subject}`;
     $("lesson-title").textContent = lesson.title;
+    $("lesson-content").textContent = lesson.content || "This is a study organizer, not a verified lesson. Use your textbook or ask the AI tutor for an explanation.";
+    const source=$("lesson-source");source.replaceChildren();
+    source.append(document.createTextNode(lesson.sourceLabel ? `Source: ${lesson.sourceLabel}` : "No reviewed lesson source is attached to this study prompt."));
+    if(lesson.sourceUrl){const link=document.createElement("a");link.href=lesson.sourceUrl;link.target="_blank";link.rel="noopener noreferrer";link.textContent="Open source";source.append(document.createTextNode(" · "),link);}
+    const examples = lesson.examples || [], points = lesson.keyPoints || [];
+    $("lesson-examples-wrap").hidden = !examples.length; $("lesson-points-wrap").hidden = !points.length;
+    $("lesson-examples").replaceChildren(...examples.map(text => { const li=document.createElement("li");li.textContent=text;return li; }));
+    $("lesson-points").replaceChildren(...points.map(text => { const li=document.createElement("li");li.textContent=text;return li; }));
+    const query = new URLSearchParams({grade:grade.value,stream:stream.value,subject:lesson.subject,topic:lesson.chapter||""});
+    $("practice-lesson").href = `/exams/?${query.toString()}`;
     const saved = state.saved.some(item => item.key === lesson.key);
     $("save-lesson").textContent = saved ? "★ Saved" : "☆ Save lesson";
     $("complete-lesson").textContent = state.completed.includes(lesson.key) ? "Completed ✓" : "Mark complete";
     dialog.showModal();
+  }
+  function renderLessons(lessons) {
+    const root=$("lesson-list");root.replaceChildren();
+    if(!lessons.length){$("lesson-status").textContent=`No reviewed ${lessonLanguage.options[lessonLanguage.selectedIndex].text} lessons are published for this selection yet. Drafts are not shown to students.`;return;}
+    $("lesson-status").textContent=`${lessons.length} reviewed lesson${lessons.length===1?"":"s"} available.`;
+    lessons.forEach(lesson=>{
+      const card=document.createElement("article");card.className="lesson-card";
+      const meta=document.createElement("p");meta.textContent=`Grade ${lesson.grade} · ${lesson.subject} · ${lesson.chapter}`;
+      const title=document.createElement("h3");title.textContent=lesson.title;
+      const language=document.createElement("p");language.textContent={en:"English",om:"Afaan Oromoo",am:"Amharic"}[lesson.language]||lesson.language;
+      const open=document.createElement("button");open.type="button";open.textContent="Open lesson";open.addEventListener("click",()=>openLesson({...lesson,key:`lesson:${lesson.id}`}));
+      card.append(meta,title,language,open);root.append(card);
+    });
+  }
+  async function loadLessons() {
+    $("lesson-status").textContent="Loading reviewed lessons…";
+    const params=new URLSearchParams({grade:grade.value,stream:stream.value,language:lessonLanguage.value});
+    if(lessonSubject.value)params.set("subject",lessonSubject.value);
+    if(lessonSearch.value.trim())params.set("search",lessonSearch.value.trim());
+    try{const result=await fetch(`/api/learning/lessons?${params}`).then(async r=>{const d=await r.json();if(!r.ok)throw new Error(d?.error?.message||"Lessons could not be loaded.");return d;});renderLessons(result.lessons);}
+    catch(error){$("lesson-status").textContent=error.message;}
+  }
+  async function loadQuizProgress() {
+    const root=$("quiz-progress");
+    try{const r=await fetch("/api/exams/history",{credentials:"same-origin"});const data=await r.json();if(!r.ok)throw new Error(data?.error?.message||"Sign in to view saved quiz results.");
+      root.replaceChildren();if(!data.attempts.length){root.textContent="No saved quiz results yet. Start a practice set to record your score.";return;}
+      data.attempts.slice(0,8).forEach(attempt=>{const item=document.createElement("p");item.textContent=`Grade ${attempt.grade} · ${attempt.subject||"All subjects"} · ${attempt.score}/${attempt.total}`;root.append(item);});
+    }catch{root.textContent="Sign in to save and view quiz scores.";}
   }
   $("save-lesson").addEventListener("click", () => {
     if (!current) return;
@@ -129,26 +172,33 @@
     if (!text) return;
     state.tasks.push({ text, done: false }); persist(); input.value = ""; renderTasks();
   });
-  function updateScope() { state.settings = { grade: grade.value, stream: stream.value }; persist(); renderSubjects(); }
+  function updateScope() { state.settings = { grade: grade.value, stream: stream.value }; persist(); renderSubjects(); loadLessons(); }
   grade.value = String(state.settings.grade || "9");
   stream.value = state.settings.stream || "natural";
+  Object.keys(subjects).sort().forEach(name=>{const option=document.createElement("option");option.value=name;option.textContent=name;lessonSubject.append(option);});
   grade.addEventListener("change", updateScope); stream.addEventListener("change", updateScope);
+  lessonSubject.addEventListener("change",loadLessons);lessonLanguage.addEventListener("change",loadLessons);
+  let searchTimer;lessonSearch.addEventListener("input",()=>{clearTimeout(searchTimer);searchTimer=setTimeout(loadLessons,250);});
   renderSubjects(); renderTasks(); renderSaved();
-  fetch("/api/account/data", { credentials: "same-origin" }).then(async response => {
-    if (!response.ok) return;
-    const result = await response.json();
-    if (result.records?.learning && typeof result.records.learning === "object") {
-      const remote = result.records.learning;
-      state.completed = [...new Set([...(remote.completed || []), ...state.completed])];
-      const savedByKey = new Map([...(remote.saved || []), ...state.saved].map(item => [item.key, item]));
-      const tasksByText = new Map([...(remote.tasks || []), ...state.tasks].map(item => [item.text, item]));
-      state.saved = [...savedByKey.values()];
-      state.tasks = [...tasksByText.values()];
-      state.settings = { ...(remote.settings || {}), ...state.settings };
-      grade.value = String(state.settings.grade || "9");
-      stream.value = state.settings.stream || "natural";
-    }
-    accountSyncEnabled = true;
-    persist(); renderSubjects(); renderTasks(); renderSaved();
-  }).catch(() => {});
+  loadLessons();
+  (async()=>{
+    try{
+      const status=await fetch("/api/account/status",{credentials:"same-origin"}).then(r=>r.json());
+      if(!status.signedIn){$("quiz-progress").textContent="Sign in to save and view quiz scores.";return;}
+      const result=await fetch("/api/account/data",{credentials:"same-origin"}).then(r=>r.json());
+      if (result.records?.learning && typeof result.records.learning === "object") {
+        const remote = result.records.learning;
+        state.completed = [...new Set([...(remote.completed || []), ...state.completed])];
+        const savedByKey = new Map([...(remote.saved || []), ...state.saved].map(item => [item.key, item]));
+        const tasksByText = new Map([...(remote.tasks || []), ...state.tasks].map(item => [item.text, item]));
+        state.saved = [...savedByKey.values()];
+        state.tasks = [...tasksByText.values()];
+        state.settings = { ...(remote.settings || {}), ...state.settings };
+        grade.value = String(state.settings.grade || "9");
+        stream.value = state.settings.stream || "natural";
+      }
+      accountSyncEnabled = true;
+      persist(); renderSubjects(); renderTasks(); renderSaved(); loadLessons(); await loadQuizProgress();
+    }catch{}
+  })();
 })();

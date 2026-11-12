@@ -8,6 +8,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/assistant/app-icon-180.png">
   <link rel="stylesheet" href="/learning/styles.css">
+  <link rel="stylesheet" href="/learning/library.css">
   <title>MINA TEACH AI | Learning dashboard</title>
 </head>
 <body>
@@ -44,6 +45,18 @@
       <article><span class="stat-icon">☆</span><div><strong id="saved-count">0</strong><small>Saved lessons</small></div></article>
     </section>
 
+    <section class="panel lesson-library" aria-labelledby="lesson-library-title">
+      <div class="section-heading"><div><p class="eyebrow">SOURCE-REVIEWED CONTENT</p><h2 id="lesson-library-title">Additional Learning</h2></div></div>
+      <p class="muted">Browse lessons published by a reviewer. Search filters the selected grade, subject, stream, and language.</p>
+      <div class="lesson-filters">
+        <label>Search lessons<input id="lesson-search" type="search" maxlength="120" placeholder="Search subject, chapter, or title"></label>
+        <label>Subject<select id="lesson-subject-filter"><option value="">All subjects</option></select></label>
+        <label>Lesson language<select id="lesson-language"><option value="en">English</option><option value="om">Afaan Oromoo</option><option value="am">Amharic</option></select></label>
+      </div>
+      <p id="lesson-status" class="notice" role="status" aria-live="polite">Loading reviewed lessons…</p>
+      <div id="lesson-list" class="lesson-list"></div>
+    </section>
+
     <section class="content-grid">
       <div class="panel subjects-panel">
         <div class="section-heading"><div><p class="eyebrow">GRADE <span id="grade-label">9</span> · <span id="stream-label">NATURAL SCIENCE</span></p><h2>Subjects and lessons</h2></div></div>
@@ -63,16 +76,24 @@
       <div class="section-heading"><div><p class="eyebrow">QUICK ACCESS</p><h2>Saved lessons</h2></div></div>
       <div id="saved-lessons" class="saved-list"><p class="muted">Save a lesson from a subject to find it here.</p></div>
     </section>
+    <section class="panel saved-panel" aria-labelledby="quiz-progress-title">
+      <div class="section-heading"><div><p class="eyebrow">RESULTS</p><h2 id="quiz-progress-title">Quiz progress</h2></div></div>
+      <div id="quiz-progress" class="muted" role="status">Sign in to load saved quiz results.</div>
+    </section>
     <footer>MINA TEACH AI · Dhaloota beekumsa omishuudha.</footer>
   </main>
 
   <dialog id="lesson-dialog">
     <form method="dialog"><button class="dialog-close" aria-label="Close">×</button></form>
     <p class="eyebrow" id="lesson-subject"></p><h2 id="lesson-title"></h2>
-    <p class="muted">Use this topic as a study prompt. For accurate definitions, examples, and curriculum coverage, follow your textbook and teacher’s guidance.</p>
+    <p id="lesson-content" class="lesson-content"></p>
+    <section id="lesson-examples-wrap" hidden><h3>Examples</h3><ul id="lesson-examples"></ul></section>
+    <section id="lesson-points-wrap" hidden><h3>Important notes</h3><ul id="lesson-points"></ul></section>
+    <p id="lesson-source" class="muted"></p>
     <div class="dialog-actions">
       <button id="save-lesson" class="button-secondary">☆ Save lesson</button>
       <button id="complete-lesson">Mark complete</button>
+      <a id="practice-lesson" class="button-secondary" href="/exams/">Practice questions</a>
       <a class="button-secondary" href="/assistant/">Ask the AI tutor</a>
     </div>
   </dialog>

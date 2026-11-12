@@ -1,6 +1,6 @@
 (() => {
   const $ = id => document.getElementById(id);
-  let editingId = null, questions = [];
+  let editingId = null, editingLessonId = null, questions = [];
   async function api(url, options={}) {
     const response = await fetch(url,{credentials:"same-origin",...options,headers:{"Content-Type":"application/json",...(options.headers||{})}});
     const data=await response.json();
@@ -31,6 +31,31 @@
       card.append(meta,title,source,actions);list.append(card);
     });
   }
+  async function loadLessons(){
+    const root=$("lesson-admin-list");root.replaceChildren();
+    try{
+      const result=await api("/api/learning/lessons/manage");
+      if(!result.lessons.length){$("lesson-admin-status").textContent="No lesson drafts or published lessons yet.";return;}
+      $("lesson-admin-status").textContent=`${result.lessons.length} lessons loaded.`;
+      result.lessons.forEach(lesson=>{
+        const card=document.createElement("article");card.className="question-card";
+        const title=document.createElement("h3");title.textContent=`Grade ${lesson.grade} · ${lesson.subject} · ${lesson.title}`;
+        const detail=document.createElement("p");detail.textContent=`${lesson.chapter} · ${lesson.language} · ${lesson.reviewStatus} · Source: ${lesson.sourceLabel}`;
+        const actions=document.createElement("div");actions.className="question-actions";
+        const edit=document.createElement("button");edit.className="secondary";edit.textContent="Edit";edit.onclick=()=>editLesson(lesson);actions.append(edit);
+        if(["admin","question_reviewer"].includes(window.minaRole)){
+          for(const status of ["published","rejected"]){if(status===lesson.reviewStatus)continue;const button=document.createElement("button");button.textContent=status==="published"?"Publish":"Reject";if(status==="rejected")button.className="reject";button.onclick=async()=>{try{await api(`/api/learning/lessons/${lesson.id}/review`,{method:"POST",body:JSON.stringify({status})});await loadLessons();}catch(e){$("lesson-admin-status").textContent=e.message;}};actions.append(button);}
+        }
+        card.append(title,detail,actions);root.append(card);
+      });
+    }catch(e){$("lesson-admin-status").textContent=e.message;}
+  }
+  function editLesson(lesson){
+    editingLessonId=lesson.id;const f=$("lesson-form");
+    for(const [key,value] of Object.entries({grade:lesson.grade,stream:lesson.stream,subject:lesson.subject,chapter:lesson.chapter,title:lesson.title,language:lesson.language,content:lesson.content,examples:(lesson.examples||[]).join("\n"),keyPoints:(lesson.keyPoints||[]).join("\n"),sourceLabel:lesson.sourceLabel,sourceUrl:lesson.sourceUrl||""}))if(f.elements[key])f.elements[key].value=value;
+    f.querySelector("button[type=submit]").textContent="Save lesson draft";$("cancel-lesson-edit").hidden=false;f.scrollIntoView({behavior:"smooth",block:"start"});
+  }
+  function resetLessonForm(){editingLessonId=null;$("lesson-form").reset();$("lesson-form").querySelector("button[type=submit]").textContent="Save lesson draft";$("cancel-lesson-edit").hidden=true;}
   function editQuestion(q){
     editingId=String(q.id);const form=$("question-form");
     for(const [key,value] of Object.entries({grade:q.grade,stream:q.stream,subject:q.subject,chapter:q.chapter,difficulty:q.difficulty,sourceKind:q.source_kind,prompt:q.prompt,correctIndex:q.correct_index,choice0:q.choices?.[0],choice1:q.choices?.[1],choice2:q.choices?.[2],choice3:q.choices?.[3],sourceLabel:q.source_label,sourceUrl:q.source_url,explanation:q.explanation}))if(form.elements[key])form.elements[key].value=value??"";
@@ -80,6 +105,13 @@
     }catch(e){$("form-status").textContent=e.status===401?"Please sign in.":e.status===403?"Administrator access is required.":e.message;}
   });
   $("cancel-edit").addEventListener("click",resetForm);
+  $("cancel-lesson-edit").addEventListener("click",resetLessonForm);
+  $("lesson-form").addEventListener("submit",async event=>{
+    event.preventDefault();const f=new FormData(event.currentTarget),payload=Object.fromEntries(f.entries());
+    payload.grade=Number(payload.grade);payload.examples=payload.examples.split("\n").map(x=>x.trim()).filter(Boolean);payload.keyPoints=payload.keyPoints.split("\n").map(x=>x.trim()).filter(Boolean);
+    try{await api(editingLessonId?`/api/learning/lessons/${editingLessonId}`:"/api/learning/lessons",{method:editingLessonId?"PUT":"POST",body:JSON.stringify(payload)});$("lesson-form-status").textContent="Saved as a draft; reviewer approval is required before students can see it.";resetLessonForm();await loadLessons();}
+    catch(e){$("lesson-form-status").textContent=e.message;}
+  });
   $("status-filter").addEventListener("change",renderQuestions);
   $("import-form").addEventListener("submit",async event=>{
     event.preventDefault();const file=event.currentTarget.elements.file.files[0];if(!file)return;
@@ -97,7 +129,7 @@
       $("gate").hidden=true;$("dashboard").hidden=false;
       $("dashboard").querySelector(".role-badge").textContent=account.role==="admin"?"Administrator":"Question Reviewer";
       if(account.role==="admin")$("roles-panel").hidden=false;
-      await loadData();if(account.role==="admin")await loadRoles();
+      window.minaRole=account.role;await loadData();if(account.role==="admin")await loadRoles();await loadLessons();
     }catch(e){accessMessage(e.message,e.status===401);}
   })();
 })();

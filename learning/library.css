@@ -1,0 +1,14 @@
+.lesson-library,.saved-panel{margin-top:18px}
+.lesson-filters{display:grid;grid-template-columns:minmax(180px,1.4fr) repeat(2,minmax(140px,1fr));gap:10px;margin:16px 0}
+.lesson-filters label{display:grid;gap:6px;font-size:12px;font-weight:700}
+.lesson-filters input,.lesson-filters select{min-width:0;padding:10px;border:1px solid #dce2ed;border-radius:9px;background:#fff;font:inherit}
+.lesson-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.lesson-card{border:1px solid #e5eaf2;border-radius:12px;padding:14px}
+.lesson-card h3{margin:5px 0;font-size:15px}
+.lesson-card p{margin:4px 0;color:#758097;font-size:12px}
+.lesson-card button,.lesson-card a{display:inline-block;margin:8px 7px 0 0;padding:8px 10px;border:0;border-radius:8px;background:#1d4c9c;color:#fff;font:inherit;font-size:12px;font-weight:700;text-decoration:none;cursor:pointer}
+.subject-practice{padding:8px 10px;border-radius:8px;background:#eaf0ff;color:#244d98;font-size:12px;font-weight:700;text-decoration:none;white-space:nowrap}
+.lesson-content{white-space:pre-wrap;line-height:1.7}
+#lesson-dialog section{margin-top:14px}
+#lesson-dialog li{margin:6px 0;line-height:1.6}
+@media(max-width:760px){.lesson-filters,.lesson-list{grid-template-columns:1fr}}
