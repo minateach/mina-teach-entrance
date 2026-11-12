@@ -34,13 +34,24 @@ const languageNames = {
 const setupMessage =
   "The AI tutor is not connected yet. Connect or update MiniMax in Replit Integrations, then restart the app. Your conversation stays in this browser.";
 
-function setSecurityHeaders(response) {
+function getLegacyInlineHashes(html) {
+  const hash = value => `'sha256-${createHash("sha256").update(value).digest("base64")}'`;
+  const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)].map(match => hash(match[1]));
+  const handlers = [...html.matchAll(/\bon\w+\s*=\s*(["'])(.*?)\1/gi)].map(match => hash(match[2]));
+  return { scripts: [...new Set(scripts)], handlers: [...new Set(handlers)] };
+}
+
+function setSecurityHeaders(response, legacyInlineHashes = null) {
   response.setHeader("X-Content-Type-Options", "nosniff");
   response.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   response.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  const inlineScriptSources = legacyInlineHashes?.scripts.length ? ` ${legacyInlineHashes.scripts.join(" ")}` : "";
+  const inlineHandlerSources = legacyInlineHashes?.handlers.length
+    ? ` 'unsafe-hashes' ${legacyInlineHashes.handlers.join(" ")}`
+    : "";
   response.setHeader(
     "Content-Security-Policy",
-    "default-src 'self'; connect-src 'self' https://*.clerk.accounts.dev https://clerk-telemetry.com https://cdn.protect.clerk.com https://*.client.protect.clerk.com; img-src 'self' data: https://*.clerk.accounts.dev https://img.clerk.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' https://*.clerk.accounts.dev https://cdn.protect.clerk.com; worker-src 'self' blob:; frame-src https://*.clerk.accounts.dev; font-src 'self' https://fonts.gstatic.com data:; base-uri 'self'; form-action 'self'; frame-ancestors 'self'",
+    `default-src 'self'; connect-src 'self' https://*.clerk.accounts.dev https://clerk-telemetry.com https://cdn.protect.clerk.com https://*.client.protect.clerk.com; img-src 'self' data: https://*.clerk.accounts.dev https://img.clerk.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' https://*.clerk.accounts.dev https://cdn.protect.clerk.com${inlineScriptSources}${inlineHandlerSources}; worker-src 'self' blob:; frame-src https://*.clerk.accounts.dev; font-src 'self' https://fonts.gstatic.com data:; base-uri 'self'; form-action 'self'; frame-ancestors 'self'`,
   );
 }
 
@@ -410,7 +421,10 @@ async function serveStatic(pathname, request, response) {
       ".webp": "image/webp",
     };
 
-    setSecurityHeaders(response);
+    const legacyInlineHashes = pathname === "/Index.HTml" || pathname === "/Index.html"
+      ? getLegacyInlineHashes(content.toString("utf8"))
+      : null;
+    setSecurityHeaders(response, legacyInlineHashes);
     response.writeHead(200, {
       "Content-Type": contentTypes[extname(absolutePath).toLowerCase()] || "application/octet-stream",
       "Cache-Control": "no-store",
