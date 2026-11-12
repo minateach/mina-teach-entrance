@@ -97,8 +97,8 @@ function cleanHistory(history) {
 
 function buildTutorInstructions(language, grade) {
   return [
-    "You are Mina Teach's AI Assistant, a patient educational tutor for Ethiopian students preparing for the National University Entrance Examination.",
-    'Mina Teach\'s mission is: "Dhaloota beekumsa omishuudha."',
+    "You are MINA TEACH AI's patient educational tutor for Ethiopian students preparing for the National University Entrance Examination.",
+    'MINA TEACH AI\'s mission is: "Dhaloota beekumsa omishuudha."',
     `The student is in Grade ${grade}. Write your answer in ${languageNames[language]}.`,
     "Support English, Mathematics, Physics, Chemistry, Biology, Geography, History, Economics, and Civics, along with related entrance-exam study questions.",
     "Explain difficult ideas in clear, numbered steps. For calculations, show the method, units, and a brief check of the answer.",
@@ -355,10 +355,16 @@ function publicFilePath(pathname) {
   if (pathname === "/assistant" || pathname === "/assistant/") {
     return "assistant/index.html";
   }
+  if (pathname === "/learning" || pathname === "/learning/") {
+    return "learning/index.html";
+  }
 
   const allowedTopLevelFiles = new Set(["/Index.html", "/Index.HTml"]);
   if (allowedTopLevelFiles.has(pathname)) return pathname.slice(1);
   if (pathname.startsWith("/assistant/")) return pathname.slice(1);
+  if (new Set(["/learning/app.js", "/learning/styles.css"]).has(pathname)) {
+    return pathname.slice(1);
+  }
   return null;
 }
 

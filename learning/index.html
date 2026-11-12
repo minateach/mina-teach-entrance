@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#10234f">
+  <link rel="icon" href="/assistant/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/learning/styles.css">
+  <title>MINA TEACH AI | Learning dashboard</title>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">
+      <img src="/assistant/favicon.svg" alt="">
+      <span><strong>MINA TEACH AI</strong><small>Dhaloota beekumsa omishuudha.</small></span>
+    </a>
+    <nav aria-label="Main navigation">
+      <a href="/">Home</a><a href="/assistant/">AI Assistant</a><a href="/Index.HTml">Practice prototype</a>
+    </nav>
+  </header>
+
+  <main class="wrap">
+    <section class="welcome">
+      <div>
+        <p class="eyebrow">YOUR STUDY SPACE</p>
+        <h1>Make steady progress.</h1>
+        <p>Choose your grade and stream, organize your study, and keep track of lessons you have completed.</p>
+      </div>
+      <div class="selectors">
+        <label>Grade
+          <select id="grade"><option value="9">Grade 9</option><option value="10">Grade 10</option><option value="11">Grade 11</option><option value="12">Grade 12</option></select>
+        </label>
+        <label>Stream
+          <select id="stream"><option value="natural">Natural Science</option><option value="social">Social Science</option></select>
+        </label>
+      </div>
+    </section>
+
+    <section class="stats" aria-label="Study summary">
+      <article><span class="stat-icon">✓</span><div><strong id="completed-count">0</strong><small>Lessons completed</small></div></article>
+      <article><span class="stat-icon">◷</span><div><strong id="task-count">0</strong><small>Study tasks open</small></div></article>
+      <article><span class="stat-icon">☆</span><div><strong id="saved-count">0</strong><small>Saved lessons</small></div></article>
+    </section>
+
+    <section class="content-grid">
+      <div class="panel subjects-panel">
+        <div class="section-heading"><div><p class="eyebrow">GRADE <span id="grade-label">9</span> · <span id="stream-label">NATURAL SCIENCE</span></p><h2>Subjects and lessons</h2></div></div>
+        <p class="notice">Topic lists are study organizers, not an official curriculum or past examination paper. Confirm chapter coverage with your current textbook and syllabus.</p>
+        <div id="subjects" class="subject-grid"></div>
+      </div>
+
+      <aside class="panel planner">
+        <p class="eyebrow">BUILD A ROUTINE</p><h2>Daily study planner</h2>
+        <p class="muted">Add a task you want to complete. Your list stays on this device.</p>
+        <form id="task-form"><label class="sr-only" for="task-input">Study task</label><input id="task-input" maxlength="120" placeholder="e.g. Review quadratic equations" required><button type="submit">Add task</button></form>
+        <ul id="task-list" class="task-list"></ul>
+      </aside>
+    </section>
+
+    <section class="panel saved-panel">
+      <div class="section-heading"><div><p class="eyebrow">QUICK ACCESS</p><h2>Saved lessons</h2></div></div>
+      <div id="saved-lessons" class="saved-list"><p class="muted">Save a lesson from a subject to find it here.</p></div>
+    </section>
+    <footer>MINA TEACH AI · Dhaloota beekumsa omishuudha.</footer>
+  </main>
+
+  <dialog id="lesson-dialog">
+    <form method="dialog"><button class="dialog-close" aria-label="Close">×</button></form>
+    <p class="eyebrow" id="lesson-subject"></p><h2 id="lesson-title"></h2>
+    <p class="muted">Use this topic as a study prompt. For accurate definitions, examples, and curriculum coverage, follow your textbook and teacher’s guidance.</p>
+    <div class="dialog-actions">
+      <button id="save-lesson" class="button-secondary">☆ Save lesson</button>
+      <button id="complete-lesson">Mark complete</button>
+      <a class="button-secondary" href="/assistant/">Ask the AI tutor</a>
+    </div>
+  </dialog>
+  <script src="/learning/app.js" defer></script>
+</body>
+</html>

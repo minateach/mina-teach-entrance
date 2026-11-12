@@ -174,7 +174,7 @@ function createMessageNode(message) {
 
   const author = document.createElement("span");
   author.className = "message-author";
-  author.textContent = message.role === "user" ? "You" : "Mina Teach";
+  author.textContent = message.role === "user" ? "You" : "MINA TEACH AI";
 
   const content = document.createElement("div");
   content.className = "message-content";

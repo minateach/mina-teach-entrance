@@ -1,0 +1,1 @@
+- [Mina Teach brand and preservation](mina-teach-brand.md) — use the official name and exact slogan while extending, not replacing, the existing project.
