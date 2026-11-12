@@ -59,6 +59,7 @@
     }
     document.querySelectorAll(".welcome,.stats,.lesson-library,.planner,.saved-panel,footer").forEach(node=>{node.hidden=false;});
     const root = $("subjects");
+    root.classList.remove("subject-detail");
     root.replaceChildren();
     visibleSubjects().forEach(([name, topics]) => {
       const done = topics.filter((_, i) => state.completed.includes(`${scopeKey()}:${name}:${i}`)).length;
@@ -76,6 +77,7 @@
   }
   function renderSubjectPage(subject) {
     const root=$("subjects");root.replaceChildren();
+    root.classList.add("subject-detail");
     const back=document.createElement("a");back.className="button-secondary";back.textContent="← All subjects";back.href=`/learning/?${new URLSearchParams({grade:grade.value,stream:stream.value})}`;
     back.addEventListener("click",event=>{event.preventDefault();requestedSubject=null;history.pushState({}, "", back.href);renderSubjects();});
     const heading=document.createElement("h2");heading.textContent=`Grade ${grade.value} · ${subject}`;
