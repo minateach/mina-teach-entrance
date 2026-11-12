@@ -451,6 +451,19 @@ a {
   font-size: 12px;
 }
 
+.status-retry {
+  display: block;
+  margin-top: 9px;
+  padding: 7px 11px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .conversation-area {
   display: flex;
   width: min(900px, 100%);

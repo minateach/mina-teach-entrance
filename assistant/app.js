@@ -66,6 +66,10 @@ function persistConversations() {
 
 async function syncAccountConversations() {
   try {
+    const authResponse = await fetch("/api/account/status", { credentials: "same-origin" });
+    if (!authResponse.ok) return;
+    const auth = await authResponse.json();
+    if (!auth.signedIn) return;
     const response = await fetch("/api/account/data", { credentials: "same-origin" });
     if (!response.ok) return;
     const { records } = await response.json();
@@ -359,6 +363,14 @@ function setStatus(state, label, bannerTitle = "", bannerMessage = "") {
   const message = document.createElement("span");
   message.textContent = bannerMessage;
   elements.statusBanner.append(title, message);
+  if (state === "error" || state === "missing") {
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "status-retry";
+    retry.textContent = "Check again";
+    retry.addEventListener("click", checkAssistantStatus);
+    elements.statusBanner.append(retry);
+  }
   elements.statusBanner.dataset.visible = "true";
 }
 
@@ -384,7 +396,7 @@ async function checkAssistantStatus() {
       setStatus(
         "missing",
         "Tutor unavailable",
-        "The tutor is not connected yet",
+        "MiniMax configuration required",
         result.message || "AI tutoring is temporarily unavailable. Your saved study sessions are still here; please try again later."
       );
     } else {

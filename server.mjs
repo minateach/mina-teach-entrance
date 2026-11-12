@@ -2,7 +2,6 @@ import { readFile } from "node:fs/promises";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ReplitConnectors } from "@replit/connectors-sdk";
 import express from "express";
 import { clerkClient, clerkMiddleware, getAuth } from "@clerk/express";
 import { publishableKeyFromHost } from "@clerk/shared/keys";
@@ -17,7 +16,6 @@ const maxHistoryMessages = 10;
 const maxMessageLength = 2_000;
 const supportedGrades = new Set([9, 10, 11, 12]);
 const supportedLanguages = new Set(["en", "am", "om"]);
-const connectors = new ReplitConnectors();
 const { Pool } = pg;
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const allowedRecordTypes = new Set(["conversations", "learning", "preferences"]);
@@ -32,7 +30,7 @@ const languageNames = {
 };
 
 const setupMessage =
-  "The AI tutor is not connected yet. Connect or update MiniMax in Replit Integrations, then restart the app. Your conversation stays in this browser.";
+  "MiniMax credentials are missing. Add a MiniMax Global API key as the server-side Replit Secret MINIMAX_API_KEY, then restart the app.";
 
 function getLegacyInlineHashes(html) {
   const hash = value => `'sha256-${createHash("sha256").update(value).digest("base64")}'`;
@@ -145,7 +143,7 @@ function normalizeProviderError(response, providerBody) {
     return {
       statusCode: 503,
       code: "SETUP_REQUIRED",
-      message: setupMessage,
+      message: "MiniMax rejected the configured API key. Use a valid key from the MiniMax Global platform in Replit Secrets.",
     };
   }
 
@@ -153,7 +151,23 @@ function normalizeProviderError(response, providerBody) {
     return {
       statusCode: 429,
       code: "RATE_LIMITED",
-      message: "The tutor is receiving many requests right now. Please wait a moment and try again.",
+      message: "MiniMax is rate-limiting requests or the account usage limit was reached. Check MiniMax usage and try again later.",
+    };
+  }
+
+  if (providerCode === 1008) {
+    return {
+      statusCode: 503,
+      code: "BILLING_REQUIRED",
+      message: "The MiniMax account has insufficient balance. Check its billing or add credits, then try again.",
+    };
+  }
+
+  if (providerCode === 2013) {
+    return {
+      statusCode: 502,
+      code: "MODEL_CONFIGURATION",
+      message: "MiniMax rejected the model or request settings. Check MINIMAX_MODEL in the server environment.",
     };
   }
 
@@ -162,6 +176,22 @@ function normalizeProviderError(response, providerBody) {
     code: "PROVIDER_ERROR",
     message: "The tutor could not answer right now. Please try again in a moment.",
   };
+}
+
+function requestMinimax(path, options = {}) {
+  const apiKey = process.env.MINIMAX_API_KEY?.trim();
+  if (!apiKey) {
+    const error = new Error("MiniMax API key is not configured.");
+    error.code = "SETUP_REQUIRED";
+    throw error;
+  }
+  return fetch(`https://api.minimaxi.chat${path}`, {
+    ...options,
+    headers: {
+      ...options.headers,
+      Authorization: `Bearer ${apiKey}`,
+    },
+  });
 }
 
 function getAnswerText(providerBody) {
@@ -244,7 +274,7 @@ async function handleAssistantChat(request, response) {
   ];
 
   try {
-    const providerResponse = await connectors.proxy("minimax", "/v1/chat/completions", {
+    const providerResponse = await requestMinimax("/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -283,6 +313,10 @@ async function handleAssistantChat(request, response) {
 
     sendJson(response, 200, { answer });
   } catch (error) {
+    if (error?.code === "SETUP_REQUIRED") {
+      sendError(response, 503, "SETUP_REQUIRED", setupMessage);
+      return;
+    }
     if (error?.name === "TimeoutError" || error?.name === "AbortError") {
       sendError(
         response,
@@ -293,18 +327,7 @@ async function handleAssistantChat(request, response) {
       return;
     }
 
-    const details = String(error?.message || "").toLowerCase();
-    if (
-      details.includes("not connected") ||
-      details.includes("unauthorized") ||
-      details.includes("credential") ||
-      details.includes("authentication")
-    ) {
-      sendError(response, 503, "SETUP_REQUIRED", setupMessage);
-      return;
-    }
-
-    console.error("[assistant] MiniMax request failed.");
+    console.error("[assistant] MiniMax request failed.", { name: error?.name || "Error" });
     sendError(
       response,
       502,
@@ -315,8 +338,17 @@ async function handleAssistantChat(request, response) {
 }
 
 async function handleAssistantStatus(response) {
+  if (!process.env.MINIMAX_API_KEY?.trim()) {
+    sendJson(response, 200, {
+      provider: "minimax",
+      configured: false,
+      code: "SETUP_REQUIRED",
+      message: setupMessage,
+    });
+    return;
+  }
   try {
-    const providerResponse = await connectors.proxy("minimax", "/v1/models", {
+    const providerResponse = await requestMinimax("/v1/models", {
       method: "GET",
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(10_000),
@@ -351,14 +383,9 @@ async function handleAssistantStatus(response) {
       message: "MiniMax is ready through Replit Integrations.",
     });
   } catch (error) {
-    const details = String(error?.message || "").toLowerCase();
-    const message =
-      details.includes("not connected") ||
-      details.includes("unauthorized") ||
-      details.includes("credential") ||
-      details.includes("authentication")
-        ? setupMessage
-        : "MiniMax could not be reached right now. Refresh this page and try again.";
+    const message = error?.code === "SETUP_REQUIRED"
+      ? setupMessage
+      : "MiniMax could not be reached right now. Refresh this page and try again.";
     sendJson(response, 200, {
       provider: "minimax",
       configured: false,
