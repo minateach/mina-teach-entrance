@@ -185,7 +185,7 @@ function requestMinimax(path, options = {}) {
     error.code = "SETUP_REQUIRED";
     throw error;
   }
-  return fetch(`https://api.minimaxi.chat${path}`, {
+  return fetch(`https://api.minimax.io${path}`, {
     ...options,
     headers: {
       ...options.headers,
