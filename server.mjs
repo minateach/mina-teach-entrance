@@ -1118,7 +1118,11 @@ app.get("/api/questions/bookmarks", requireAuth, async (request, response) => {
 app.put("/api/questions/:id/bookmark", requireAuth, async (request, response) => {
   if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
   try {
-    await pool.query("INSERT INTO mina_question_bookmarks (user_id,question_id) SELECT $1,id FROM mina_questions WHERE id=$2 AND review_status='approved' ON CONFLICT DO NOTHING", [request.userId, request.params.id]);
+    const result = await pool.query(
+      "WITH eligible AS (SELECT id FROM mina_questions WHERE id=$2 AND review_status='approved'), saved AS (INSERT INTO mina_question_bookmarks (user_id,question_id) SELECT $1,id FROM eligible ON CONFLICT DO NOTHING RETURNING question_id) SELECT EXISTS(SELECT 1 FROM eligible) AS eligible",
+      [request.userId, request.params.id],
+    );
+    if (!result.rows[0]?.eligible) { sendError(response, 404, "QUESTION_NOT_AVAILABLE", "Only approved questions can be saved."); return; }
     sendJson(response, 200, { saved: true });
   } catch { sendError(response, 400, "BOOKMARK_FAILED", "This question could not be saved."); }
 });
