@@ -26,6 +26,7 @@
   const grade = $("grade"), stream = $("stream"), dialog = $("lesson-dialog");
   const lessonSearch = $("lesson-search"), lessonSubject = $("lesson-subject-filter"), lessonLanguage = $("lesson-language");
   let current = null;
+  let requestedSubject = new URLSearchParams(location.search).get("subject");
 
   function load() {
     try {
@@ -42,12 +43,21 @@
   }
   function scopeKey() { return `${grade.value}:${stream.value}`; }
   function visibleSubjects() {
-    const social = new Set(["English","Afaan Oromoo","Amharic","Geography","History","Economics","Civics and Ethics","ICT","Aptitude","Environmental Science","General Knowledge"]);
-    return Object.entries(subjects).filter(([name]) => stream.value === "natural" || social.has(name));
+    const common = ["English","Afaan Oromoo","Amharic","ICT","Aptitude","General Knowledge","Health and Physical Education"];
+    const natural = new Set(["Mathematics","Physics","Chemistry","Biology","Environmental Science","Basic Technical Drawing",...common]);
+    const social = new Set(["Geography","History","Economics","Civics and Ethics","General Business",...common]);
+    return Object.entries(subjects).filter(([name]) => (stream.value === "natural" ? natural : social).has(name));
   }
   function renderSubjects() {
     $("grade-label").textContent = grade.value;
     $("stream-label").textContent = stream.value === "natural" ? "NATURAL SCIENCE" : "SOCIAL SCIENCE";
+    if (requestedSubject && subjects[requestedSubject]) {
+      document.querySelectorAll(".welcome,.stats,.lesson-library,.planner,.saved-panel,footer").forEach(node=>{node.hidden=true;});
+      renderSubjectPage(requestedSubject);
+      window.scrollTo(0,0);
+      return;
+    }
+    document.querySelectorAll(".welcome,.stats,.lesson-library,.planner,.saved-panel,footer").forEach(node=>{node.hidden=false;});
     const root = $("subjects");
     root.replaceChildren();
     visibleSubjects().forEach(([name, topics]) => {
@@ -57,10 +67,29 @@
       const title = document.createElement("h3"); title.textContent = name;
       const meta = document.createElement("small"); meta.textContent = `${done} of ${topics.length} study prompts completed`;
       text.append(title, meta);
-      const button = document.createElement("button"); button.type = "button"; button.textContent = "View topics";
-      button.addEventListener("click", () => showTopics(name, topics));
+      const button = document.createElement("a"); button.className="subject-open"; button.textContent = "Open subject";
+      button.href=`/learning/?${new URLSearchParams({grade:grade.value,stream:stream.value,subject:name})}`;
       const practice=document.createElement("a");practice.className="subject-practice";practice.textContent="Practice";practice.href=`/exams/?${new URLSearchParams({grade:grade.value,stream:stream.value,subject:name})}`;
       card.append(text, button, practice); root.append(card);
+    });
+    updateStats();
+  }
+  function renderSubjectPage(subject) {
+    const root=$("subjects");root.replaceChildren();
+    const back=document.createElement("a");back.className="button-secondary";back.textContent="← All subjects";back.href=`/learning/?${new URLSearchParams({grade:grade.value,stream:stream.value})}`;
+    back.addEventListener("click",event=>{event.preventDefault();requestedSubject=null;history.pushState({}, "", back.href);renderSubjects();});
+    const heading=document.createElement("h2");heading.textContent=`Grade ${grade.value} · ${subject}`;
+    const intro=document.createElement("p");intro.className="muted";intro.textContent="Choose a topic to open its study panel, or start a subject-filtered exam.";
+    const practice=document.createElement("a");practice.className="subject-open";practice.textContent="Practice this subject";practice.href=`/exams/?${new URLSearchParams({grade:grade.value,stream:stream.value,subject})}`;
+    root.append(back,heading,intro,practice);
+    subjects[subject].forEach((title,index)=>{
+      const key=`${scopeKey()}:${subject}:${index}`;
+      const row=document.createElement("article");row.className="subject-card";
+      const text=document.createElement("div");const label=document.createElement("h3");label.textContent=title;
+      const meta=document.createElement("small");meta.textContent=state.completed.includes(key)?"Completed":"Study prompt";
+      text.append(label,meta);
+      const open=document.createElement("button");open.type="button";open.textContent="Open topic";open.addEventListener("click",()=>openLesson({key,subject,title}));
+      row.append(text,open);root.append(row);
     });
     updateStats();
   }
@@ -173,10 +202,14 @@
     state.tasks.push({ text, done: false }); persist(); input.value = ""; renderTasks();
   });
   function updateScope() { state.settings = { grade: grade.value, stream: stream.value }; persist(); renderSubjects(); loadLessons(); }
-  grade.value = String(state.settings.grade || "9");
-  stream.value = state.settings.stream || "natural";
+  const routeGrade=new URLSearchParams(location.search).get("grade");
+  const routeStream=new URLSearchParams(location.search).get("stream");
+  grade.value = ["9","10","11","12"].includes(routeGrade) ? routeGrade : String(state.settings.grade || "9");
+  stream.value = ["natural","social"].includes(routeStream) ? routeStream : state.settings.stream || "natural";
+  if(!subjects[requestedSubject])requestedSubject=null;
   Object.keys(subjects).sort().forEach(name=>{const option=document.createElement("option");option.value=name;option.textContent=name;lessonSubject.append(option);});
   grade.addEventListener("change", updateScope); stream.addEventListener("change", updateScope);
+  window.addEventListener("popstate",()=>{const params=new URLSearchParams(location.search);requestedSubject=params.get("subject");if(!subjects[requestedSubject])requestedSubject=null;const g=params.get("grade"),s=params.get("stream");if(["9","10","11","12"].includes(g))grade.value=g;if(["natural","social"].includes(s))stream.value=s;renderSubjects();loadLessons();});
   lessonSubject.addEventListener("change",loadLessons);lessonLanguage.addEventListener("change",loadLessons);
   let searchTimer;lessonSearch.addEventListener("input",()=>{clearTimeout(searchTimer);searchTimer=setTimeout(loadLessons,250);});
   renderSubjects(); renderTasks(); renderSaved();
