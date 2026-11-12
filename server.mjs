@@ -674,6 +674,10 @@ function questionFilters(query, approvedOnly = true) {
     add("stream", query.stream);
   }
   if (query.subject) add("subject", String(query.subject).slice(0, 80));
+  if (query.topic) {
+    params.push(String(query.topic).trim().slice(0, 120));
+    clauses.push(`LOWER(chapter) = LOWER($${params.length})`);
+  }
   if (query.difficulty) {
     if (!difficulties.has(query.difficulty)) throw new Error("Choose an available difficulty.");
     add("difficulty", query.difficulty);

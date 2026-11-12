@@ -1,6 +1,6 @@
 (() => {
   const $ = id => document.getElementById(id);
-  const filters = () => ({ grade: Number($("grade").value), stream: $("stream").value, subject: $("subject").value, difficulty: $("difficulty").value });
+  const filters = () => ({ grade: Number($("grade").value), stream: $("stream").value, subject: $("subject").value, topic: $("topic").value.trim(), difficulty: $("difficulty").value });
   let available = 0, attempt = null, position = 0, answers = {}, chosen = null, timerId = null, remaining = 60, editingQuestionId = null;
   async function api(url, options={}) {
     const response = await fetch(url, { credentials:"same-origin", ...options, headers:{"Content-Type":"application/json",...(options.headers||{})} });
@@ -99,6 +99,7 @@
     }catch(e){$("import-status").textContent=e.message==="Unexpected end of JSON input"?"The selected file is not valid JSON.":e.status===403?"Educator access has not been assigned to this account.":e.message;}
   });
   ["grade","stream","subject","difficulty"].forEach(id=>$(id).addEventListener("change",updateCount));
+  $("topic").addEventListener("input",()=>{clearTimeout(window.topicFilterTimer);window.topicFilterTimer=setTimeout(updateCount,250);});
   $("start-exam").onclick=async()=>{
     try{attempt=await api("/api/exams",{method:"POST",body:JSON.stringify(filters())});answers={};position=0;$("setup").hidden=true;$("exam").hidden=false;renderQuestion();}
     catch(e){$("bank-status").textContent=e.status===401?"Sign in before starting an exam.":e.message;}
