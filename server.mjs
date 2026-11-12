@@ -133,6 +133,7 @@ function buildTutorInstructions(language, grade) {
 
 function normalizeProviderError(response, providerBody) {
   const providerCode = Number(providerBody?.base_resp?.status_code);
+  const providerErrorType = String(providerBody?.error?.type || "").toLowerCase();
   const providerMessage = String(
     providerBody?.base_resp?.status_msg || providerBody?.error?.message || "",
   ).toLowerCase();
@@ -160,11 +161,15 @@ function normalizeProviderError(response, providerBody) {
     };
   }
 
-  if (providerCode === 1008) {
+  if (
+    response.status === 402 ||
+    providerCode === 1008 ||
+    providerErrorType.includes("insufficient_balance")
+  ) {
     return {
-      statusCode: 503,
+      statusCode: 402,
       code: "BILLING_REQUIRED",
-      message: "The MiniMax account has insufficient balance. Check its billing or add credits, then try again.",
+      message: "MiniMax accepted the API key but reports no available balance for this request. No credits were added. Check whether your current MiniMax plan includes API usage; if not, leave the assistant disconnected rather than purchasing credits.",
     };
   }
 
@@ -300,6 +305,15 @@ async function handleAssistantChat(request, response) {
 
     const providerCode = Number(providerBody?.base_resp?.status_code);
     if (!providerResponse.ok || (Number.isFinite(providerCode) && providerCode !== 0)) {
+      console.warn("[assistant] MiniMax chat request rejected.", {
+        httpStatus: providerResponse.status,
+        providerCode: Number.isFinite(providerCode) ? providerCode : null,
+        errorType:
+          typeof providerBody?.error?.type === "string"
+            ? providerBody.error.type.slice(0, 60)
+            : null,
+        model: process.env.MINIMAX_MODEL || "MiniMax-M3",
+      });
       const failure = normalizeProviderError(providerResponse, providerBody);
       sendError(response, failure.statusCode, failure.code, failure.message);
       return;
@@ -385,7 +399,7 @@ async function handleAssistantStatus(response) {
     sendJson(response, 200, {
       provider: "minimax",
       configured: true,
-      message: "MiniMax is ready through Replit Integrations.",
+      message: "MiniMax credentials are accepted. Chat availability still depends on the account's available API usage.",
     });
   } catch (error) {
     const message = error?.code === "SETUP_REQUIRED"

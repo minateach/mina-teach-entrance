@@ -391,7 +391,7 @@ async function checkAssistantStatus() {
         ? false
         : null;
     if (providerConfigured) {
-      setStatus("ready", "Tutor ready");
+      setStatus("ready", "Tutor configured");
     } else if (providerConfigured === false) {
       setStatus(
         "missing",
@@ -525,12 +525,16 @@ async function sendMessage(rawMessage, isRetry = false) {
     retryMessage = messageText;
     retryError = error.message || "Please check your connection and try again.";
     if (error.code === "SETUP_REQUIRED") providerConfigured = false;
-    setStatus(
-      providerConfigured === false ? "missing" : "error",
-      providerConfigured === false ? "Tutor unavailable" : "Connection issue",
-      providerConfigured === false ? "The tutor is not connected yet" : "The tutor could not answer",
-      retryError
-    );
+    if (error.code === "BILLING_REQUIRED") {
+      setStatus("error", "Usage unavailable", "MiniMax has no available API usage", retryError);
+    } else {
+      setStatus(
+        providerConfigured === false ? "missing" : "error",
+        providerConfigured === false ? "Tutor unavailable" : "Connection issue",
+        providerConfigured === false ? "The tutor is not connected yet" : "The tutor could not answer",
+        retryError
+      );
+    }
   } finally {
     isLoading = false;
     persistConversations();
