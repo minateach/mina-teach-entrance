@@ -460,7 +460,7 @@ function requireRole(...roles) {
     try {
       const result = await pool.query("SELECT role FROM mina_user_roles WHERE user_id = $1", [request.userId]);
       if (!roles.includes(result.rows[0]?.role)) {
-        sendError(response, 403, "FORBIDDEN", "This action requires an authorized educator account.");
+        sendError(response, 403, "FORBIDDEN", "This action requires an authorized content-management account.");
         return;
       }
       next();
@@ -569,7 +569,7 @@ app.get("/api/account/status", async (request, response) => {
   } catch { sendJson(response, 200, { signedIn: true, role: "student" }); }
 });
 
-app.get("/api/educator/access", requireAuth, requireRole("educator", "admin"), (_request, response) => {
+app.get("/api/educator/access", requireAuth, requireRole("teacher", "question_reviewer", "educator", "admin"), (_request, response) => {
   sendJson(response, 200, { authorized: true });
 });
 
@@ -640,6 +640,9 @@ app.delete("/api/account/data", requireAuth, async (request, response) => {
 const questionStreams = new Set(["natural", "social", "common"]);
 const difficulties = new Set(["easy", "medium", "hard"]);
 const sourceKinds = new Set(["textbook", "teacher_authored", "open_resource", "ai_generated", "legacy"]);
+const appRoles = new Set(["student", "teacher", "question_reviewer", "educator", "admin"]);
+const contentRoles = ["teacher", "question_reviewer", "educator", "admin"];
+const reviewRoles = ["question_reviewer", "admin"];
 function isValidQuestionInput(input) {
   if (!input || ![9,10,11,12].includes(Number(input.grade)) || !questionStreams.has(input.stream) ||
       !difficulties.has(input.difficulty) || !sourceKinds.has(input.sourceKind || "teacher_authored") ||
@@ -694,18 +697,51 @@ app.get("/api/questions", async (request, response) => {
   }
 });
 
-app.get("/api/questions/manage", requireAuth, requireRole("educator", "admin"), async (_request, response) => {
+app.get("/api/questions/manage", requireAuth, requireRole(...contentRoles), async (_request, response) => {
   try {
     const result = await pool.query("SELECT id,grade,stream,subject,chapter,prompt,choices,correct_index,explanation,difficulty,source_label,source_url,source_kind,review_status FROM mina_questions ORDER BY created_at DESC LIMIT 300");
     sendJson(response, 200, { questions: result.rows });
   } catch { sendError(response, 500, "QUESTION_MANAGEMENT_FAILED", "Questions could not be loaded."); }
 });
 
-app.get("/api/admin/status", requireAuth, requireRole("admin"), async (_request, response) => {
+app.get("/api/admin/status", requireAuth, requireRole(...reviewRoles), async (_request, response) => {
   try {
     const result = await pool.query("SELECT COUNT(*)::int AS total,COUNT(*) FILTER (WHERE review_status='draft')::int AS drafts,COUNT(*) FILTER (WHERE review_status='approved')::int AS approved,COUNT(*) FILTER (WHERE review_status='rejected')::int AS rejected,COUNT(*) FILTER (WHERE review_status='approved' AND source_kind<>'ai_generated')::int AS exam_eligible FROM mina_questions");
     sendJson(response, 200, result.rows[0]);
   } catch { sendError(response, 500, "ADMIN_DASHBOARD_FAILED", "Question summary could not be loaded."); }
+});
+
+app.get("/api/admin/users", requireAuth, requireRole("admin"), async (_request, response) => {
+  try {
+    const result = await pool.query("SELECT user_id,role FROM mina_user_roles ORDER BY role,user_id LIMIT 500");
+    sendJson(response, 200, { users: result.rows });
+  } catch { sendError(response, 500, "ROLE_LIST_FAILED", "Account roles could not be loaded."); }
+});
+
+app.put("/api/admin/users/:userId/role", requireAuth, requireRole("admin"), async (request, response) => {
+  if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
+  const userId = String(request.params.userId || "");
+  if (!/^user_[A-Za-z0-9_-]{4,80}$/.test(userId)) { sendError(response, 400, "INVALID_USER_ID", "Choose a valid account."); return; }
+  let client;
+  try {
+    const input = await readJsonBody(request);
+    if (!appRoles.has(input?.role)) { sendError(response, 400, "INVALID_ROLE", "Choose an available account role."); return; }
+    client = await pool.connect();
+    await client.query("BEGIN");
+    await client.query("SELECT id FROM mina_admin_bootstrap WHERE id=1 FOR UPDATE");
+    const target = await client.query("SELECT role FROM mina_user_roles WHERE user_id=$1 FOR UPDATE", [userId]);
+    if (!target.rowCount) { await client.query("ROLLBACK"); sendError(response, 404, "USER_NOT_FOUND", "The account must sign in once before its role can be changed."); return; }
+    const admins = await client.query("SELECT COUNT(*)::int AS count FROM mina_user_roles WHERE role='admin'");
+    if (target.rows[0].role === "admin" && input.role !== "admin" && admins.rows[0].count <= 1) {
+      await client.query("ROLLBACK"); sendError(response, 409, "LAST_ADMIN", "The last administrator cannot be removed."); return;
+    }
+    await client.query("UPDATE mina_user_roles SET role=$1 WHERE user_id=$2", [input.role,userId]);
+    await client.query("COMMIT");
+    sendJson(response, 200, { updated: true, role: input.role });
+  } catch {
+    if (client) await client.query("ROLLBACK").catch(()=>{});
+    sendError(response, 500, "ROLE_UPDATE_FAILED", "The account role could not be changed.");
+  } finally { client?.release(); }
 });
 
 app.post("/api/exams", requireAuth, async (request, response) => {
@@ -760,7 +796,7 @@ app.get("/api/exams/history", requireAuth, async (request, response) => {
   } catch { sendError(response, 500, "EXAM_HISTORY_FAILED", "Exam history could not be loaded."); }
 });
 
-app.post("/api/questions", requireAuth, requireRole("educator", "admin"), async (request, response) => {
+app.post("/api/questions", requireAuth, requireRole(...contentRoles), async (request, response) => {
   try {
     if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
     const input = await readJsonBody(request);
@@ -773,7 +809,7 @@ app.post("/api/questions", requireAuth, requireRole("educator", "admin"), async 
   } catch { sendError(response, 500, "QUESTION_SAVE_FAILED", "The question could not be saved."); }
 });
 
-app.post("/api/questions/import", requireAuth, requireRole("educator", "admin"), async (request, response) => {
+app.post("/api/questions/import", requireAuth, requireRole(...contentRoles), async (request, response) => {
   if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
   let client;
   try {
@@ -801,7 +837,7 @@ app.post("/api/questions/import", requireAuth, requireRole("educator", "admin"),
   } finally { client?.release(); }
 });
 
-app.put("/api/questions/:id", requireAuth, requireRole("educator", "admin"), async (request, response) => {
+app.put("/api/questions/:id", requireAuth, requireRole(...contentRoles), async (request, response) => {
   try {
     if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
     const input = await readJsonBody(request);
@@ -814,7 +850,7 @@ app.put("/api/questions/:id", requireAuth, requireRole("educator", "admin"), asy
   } catch { sendError(response,500,"QUESTION_UPDATE_FAILED","The question could not be updated."); }
 });
 
-app.post("/api/questions/:id/review", requireAuth, requireRole("admin"), async (request, response) => {
+app.post("/api/questions/:id/review", requireAuth, requireRole(...reviewRoles), async (request, response) => {
   try {
     if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
     const input = await readJsonBody(request);

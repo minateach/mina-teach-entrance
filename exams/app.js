@@ -56,10 +56,10 @@
     catch{root.textContent="Sign in to save and view exam history.";}
   }
   async function loadEducator(){
-    try{const account=await api("/api/account/data");if(!["educator","admin"].includes(account.role))return;
+    try{const account=await api("/api/account/data");if(!["teacher","question_reviewer","educator","admin"].includes(account.role))return;
       $("educator").hidden=false;
-      $("educator").querySelector(".eyebrow").textContent=account.role==="admin"?"ADMINISTRATOR REVIEW":"AUTHORIZED EDUCATOR";
-      $("educator").querySelector(".muted").textContent=account.role==="admin"?"You can edit, approve, and reject sourced questions. Only approved curriculum questions appear in student exams.":"New questions start as drafts. An administrator must review and approve them before they appear in student exams.";
+      $("educator").querySelector(".eyebrow").textContent=["admin","question_reviewer"].includes(account.role)?"AUTHORIZED QUESTION REVIEWER":"AUTHORIZED EDUCATOR";
+      $("educator").querySelector(".muted").textContent=["admin","question_reviewer"].includes(account.role)?"You can review sourced questions. Only approved curriculum questions appear in student exams.":"New questions start as drafts. A question reviewer must review them before they appear in student exams.";
       const manage=await api("/api/questions/manage");
       $("draft-list").replaceChildren();
       manage.questions.forEach(q=>{
@@ -70,7 +70,7 @@
           (q.choices||[]).forEach((value,i)=>f.elements[`choice${i}`].value=value);
           f.querySelector("button[type=submit]").textContent="Save changes as draft";
         };row.append(edit);
-        if(account.role==="admin"){
+        if(["admin","question_reviewer"].includes(account.role)){
           for(const status of ["approved","rejected"]){
             if(status===q.review_status)continue;
             const review=document.createElement("button");review.textContent=status==="approved"?"Approve":"Reject";

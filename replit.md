@@ -49,6 +49,10 @@ existing work.
   first-admin claim is restricted to the owner's verified email, stored only as
   a SHA-256 digest, and consumed atomically. Never add public self-service role
   elevation, hardcode the owner's email, or bypass verified-email checks.
+- Supported application roles are `student`, `teacher`, `question_reviewer`,
+  and `admin`; keep `educator` accepted for existing accounts. Only an
+  administrator can assign roles. Preserve at least one administrator.
 - The first admin can create and edit question drafts and approve or reject
-  questions. Student exams may only use approved, source-labeled curriculum
-  questions; AI-generated practice stays separate from that bank.
+  questions. Teachers can author drafts; reviewers can manage and approve
+  sourced questions. Student exams may only use approved, source-labeled
+  curriculum questions; AI-generated practice stays separate from that bank.

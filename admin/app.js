@@ -53,6 +53,22 @@
       questions=bank.questions;renderQuestions();
     }catch(e){accessMessage(e.status===403?"Your signed-in account does not have the administrator role.":e.message,e.status===401);}
   }
+  async function loadRoles(){
+    if($("roles-panel").hidden)return;
+    try{
+      const result=await api("/api/admin/users"),root=$("role-list");root.replaceChildren();
+      result.users.forEach(user=>{
+        const row=document.createElement("div");row.className="role-row";
+        const id=document.createElement("code");id.className="role-id";id.textContent=user.user_id;
+        const select=document.createElement("select");select.className="role-select";
+        for(const role of ["student","teacher","question_reviewer","educator","admin"]){const option=document.createElement("option");option.value=role;option.textContent=role.replaceAll("_"," ");option.selected=role===user.role;select.append(option);}
+        const save=document.createElement("button");save.textContent="Save role";
+        save.onclick=async()=>{try{await api(`/api/admin/users/${encodeURIComponent(user.user_id)}/role`,{method:"PUT",body:JSON.stringify({role:select.value})});$("roles-status").textContent="Role updated.";await loadRoles();}catch(e){$("roles-status").textContent=e.message;}};
+        row.append(id,select,save);root.append(row);
+      });
+      if(!result.users.length)root.textContent="No signed-in accounts yet.";
+    }catch(e){$("roles-status").textContent=e.message;}
+  }
   $("question-form").addEventListener("submit",async event=>{
     event.preventDefault();const f=new FormData(event.currentTarget),payload=Object.fromEntries(f.entries());
     payload.grade=Number(payload.grade);payload.correctIndex=Number(payload.correctIndex);
@@ -75,10 +91,13 @@
     try{
       const status=await api("/api/account/status");
       if(!status.signedIn){accessMessage("Sign in with the project owner account to open question review.",true);return;}
-      if(status.role!=="admin"){accessMessage("This signed-in account does not have the administrator role.");return;}
+      if(!["admin","question_reviewer"].includes(status.role)){accessMessage("This signed-in account does not have the administrator or question-reviewer role.");return;}
       const account=await api("/api/account/data");
-      if(account.role!=="admin"){accessMessage(account.role==="student"?"This account is signed in but does not have the administrator role.":"Question review access is not enabled for this account.");return;}
-      $("gate").hidden=true;$("dashboard").hidden=false;await loadData();
+      if(!["admin","question_reviewer"].includes(account.role)){accessMessage("This signed-in account does not have question-review access.");return;}
+      $("gate").hidden=true;$("dashboard").hidden=false;
+      $("dashboard").querySelector(".role-badge").textContent=account.role==="admin"?"Administrator":"Question Reviewer";
+      if(account.role==="admin")$("roles-panel").hidden=false;
+      await loadData();if(account.role==="admin")await loadRoles();
     }catch(e){accessMessage(e.message,e.status===401);}
   })();
 })();
