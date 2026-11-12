@@ -379,6 +379,8 @@ function publicFilePath(pathname) {
   }
   if (pathname === "/exams" || pathname === "/exams/") return "exams/index.html";
   if (new Set(["/exams/app.js", "/exams/styles.css"]).has(pathname)) return pathname.slice(1);
+  if (pathname === "/admin" || pathname === "/admin/") return "admin/index.html";
+  if (new Set(["/admin/app.js", "/admin/styles.css"]).has(pathname)) return pathname.slice(1);
   if (pathname === "/account" || pathname === "/account/" || pathname.startsWith("/account/sign-in") || pathname.startsWith("/account/sign-up")) {
     return "account-dist/index.html";
   }
@@ -697,6 +699,13 @@ app.get("/api/questions/manage", requireAuth, requireRole("educator", "admin"), 
     const result = await pool.query("SELECT id,grade,stream,subject,chapter,prompt,choices,correct_index,explanation,difficulty,source_label,source_url,source_kind,review_status FROM mina_questions ORDER BY created_at DESC LIMIT 300");
     sendJson(response, 200, { questions: result.rows });
   } catch { sendError(response, 500, "QUESTION_MANAGEMENT_FAILED", "Questions could not be loaded."); }
+});
+
+app.get("/api/admin/status", requireAuth, requireRole("admin"), async (_request, response) => {
+  try {
+    const result = await pool.query("SELECT COUNT(*)::int AS total,COUNT(*) FILTER (WHERE review_status='draft')::int AS drafts,COUNT(*) FILTER (WHERE review_status='approved')::int AS approved,COUNT(*) FILTER (WHERE review_status='rejected')::int AS rejected,COUNT(*) FILTER (WHERE review_status='approved' AND source_kind<>'ai_generated')::int AS exam_eligible FROM mina_questions");
+    sendJson(response, 200, result.rows[0]);
+  } catch { sendError(response, 500, "ADMIN_DASHBOARD_FAILED", "Question summary could not be loaded."); }
 });
 
 app.post("/api/exams", requireAuth, async (request, response) => {
