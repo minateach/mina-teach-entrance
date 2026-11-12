@@ -1,7 +1,7 @@
 (() => {
   const $ = id => document.getElementById(id);
   const filters = () => ({ grade: Number($("grade").value), stream: $("stream").value, subject: $("subject").value, topic: $("topic").value.trim(), difficulty: $("difficulty").value });
-  let available = 0, attempt = null, position = 0, answers = {}, chosen = null, timerId = null, remaining = 60, editingQuestionId = null;
+  let available = 0, attempt = null, position = 0, answers = {}, chosen = null, timerId = null, remaining = 60, editingQuestionId = null, submitting = false;
   async function api(url, options={}) {
     const response = await fetch(url, { credentials:"same-origin", ...options, headers:{"Content-Type":"application/json",...(options.headers||{})} });
     const body = await response.json();
@@ -22,33 +22,42 @@
     timerId=setInterval(()=>{ remaining--; $("timer").textContent=remaining; if(remaining<=0){ answers[attempt.questions[position].id]=chosen; nextQuestion(); } },1000);
   }
   function renderQuestion() {
-    const q=attempt.questions[position]; chosen=null;
+    const q=attempt.questions[position]; chosen=Number.isInteger(answers[q.id])?answers[q.id]:null;
     $("progress").textContent=`Question ${position+1} of ${attempt.total}`;
     $("question").textContent=q.prompt;
     $("question-source").textContent=`Source: ${q.sourceLabel} · ${q.sourceKind.replaceAll("_"," ")}`;
     $("choices").replaceChildren();
-    q.choices.forEach((value,index)=>{const button=document.createElement("button");button.className="choice";button.textContent=`${String.fromCharCode(65+index)}. ${value}`;button.setAttribute("aria-pressed","false");button.onclick=()=>{chosen=index;document.querySelectorAll(".choice").forEach(el=>el.setAttribute("aria-pressed","false"));button.setAttribute("aria-pressed","true");};$("choices").append(button);});
+     q.choices.forEach((value,index)=>{const button=document.createElement("button");button.className="choice";button.textContent=`${String.fromCharCode(65+index)}. ${value}`;button.setAttribute("aria-pressed",String(chosen===index));button.onclick=()=>{chosen=index;document.querySelectorAll(".choice").forEach(el=>el.setAttribute("aria-pressed","false"));button.setAttribute("aria-pressed","true");};$("choices").append(button);});
     $("bookmark").onclick=async()=>{try{await api(`/api/questions/${q.id}/bookmark`,{method:"PUT"});$("bookmark").textContent="★ Saved";}catch(e){$("bookmark").textContent=e.status===401?"Sign in to save":"Could not save";}};
-    $("next").textContent=position+1===attempt.total?"Finish exam":"Next question";
+    $("previous").disabled=position===0;
+    $("next").hidden=position===attempt.total-1;
+    $("submit-exam").hidden=position!==attempt.total-1;
     startTimer();
   }
   async function nextQuestion() {
     if(!attempt)return;
-    clearInterval(timerId); answers[attempt.questions[position].id]=chosen;
+    clearInterval(timerId);
+    if(position===attempt.total-1){await submitExam();return;}
+    answers[attempt.questions[position].id]=chosen;
     position++;
-    if(position<attempt.total){renderQuestion();return;}
-    await submitExam();
+    renderQuestion();
+  }
+  function previousQuestion(){
+    if(!attempt||position===0||submitting)return;
+    clearInterval(timerId);answers[attempt.questions[position].id]=chosen;position--;renderQuestion();
   }
   async function submitExam() {
-    clearInterval(timerId);$("exam").hidden=true;$("results").hidden=false;$("results").innerHTML="<h2>Saving your result…</h2>";
+    if(!attempt||submitting)return;
+    submitting=true;clearInterval(timerId);answers[attempt.questions[position].id]=chosen;
+    $("submit-exam").disabled=true;$("exam").hidden=true;$("results").hidden=false;$("results").innerHTML="<h2>Saving your result…</h2>";
     try{
       const result=await api(`/api/exams/${attempt.attemptId}/submit`,{method:"POST",body:JSON.stringify({answers})});
       const box=$("results");box.replaceChildren();
       const title=document.createElement("h2");title.textContent=`Result: ${result.score} / ${result.total} (${result.percentage}%)`;box.append(title);
-      const again=document.createElement("button");again.textContent="Try again";again.onclick=()=>{$("results").hidden=true;$("setup").hidden=false;updateCount();};box.append(again);
+      const again=document.createElement("button");again.textContent="Try again";again.onclick=()=>{submitting=false;$("submit-exam").disabled=false;$("results").hidden=true;$("setup").hidden=false;updateCount();};box.append(again);
       result.review.forEach((q,i)=>{const section=document.createElement("article");section.className="review";const h=document.createElement("h3");h.textContent=`${i+1}. ${q.prompt}`;const p=document.createElement("p");p.className=q.isCorrect?"correct":"incorrect";p.textContent=`${q.isCorrect?"Correct":"Review"} · Correct answer: ${String.fromCharCode(65+q.correctIndex)}. ${q.choices[q.correctIndex]}`;const exp=document.createElement("p");exp.textContent=q.explanation;section.append(h,p,exp);box.append(section);});
       await loadHistory();
-    }catch(e){$("results").textContent=e.message;}
+    }catch(e){$("results").textContent=e.message;$("results").hidden=false;$("exam").hidden=false;submitting=false;$("submit-exam").disabled=false;}
   }
   async function loadHistory(){
     const root=$("history-list");root.replaceChildren();
@@ -103,10 +112,12 @@
   ["grade","stream","subject","difficulty"].forEach(id=>$(id).addEventListener("change",updateCount));
   $("topic").addEventListener("input",()=>{clearTimeout(window.topicFilterTimer);window.topicFilterTimer=setTimeout(updateCount,250);});
   $("start-exam").onclick=async()=>{
-    try{attempt=await api("/api/exams",{method:"POST",body:JSON.stringify(filters())});answers={};position=0;$("setup").hidden=true;$("exam").hidden=false;renderQuestion();}
+    try{attempt=await api("/api/exams",{method:"POST",body:JSON.stringify(filters())});answers={};position=0;submitting=false;$("submit-exam").disabled=false;$("setup").hidden=true;$("exam").hidden=false;renderQuestion();}
     catch(e){$("bank-status").textContent=e.status===401?"Sign in before starting an exam.":e.message;}
   };
   $("next").onclick=nextQuestion;
+  $("previous").onclick=previousQuestion;
+  $("submit-exam").onclick=submitExam;
   async function initializeAccount(){try{const status=await api("/api/account/status");if(!status.signedIn){$("history-list").textContent="Sign in to save exam results."; $("saved-questions").textContent="Sign in to view saved questions."; return;}await Promise.all([loadHistory(),loadBookmarks(),loadEducator()]);}catch{}}
   initializeAccount();updateCount();
   async function loadBookmarks(){try{const result=await api("/api/questions/bookmarks");const root=$("saved-questions");root.replaceChildren();result.questions.forEach(q=>{const item=document.createElement("p");item.textContent=`${q.subject}: ${q.prompt}`;root.append(item);});if(!result.questions.length)root.textContent="No saved questions yet.";}catch{}}
