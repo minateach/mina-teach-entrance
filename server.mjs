@@ -30,8 +30,11 @@ const languageNames = {
   om: "Afaan Oromoo",
 };
 
+const geminiModel = "gemini-3.8-flash";
+const geminiSetupMessage =
+  "Gemini is not configured. Add GEMINI_API_KEY in Replit Secrets using a Google AI Studio API key. This app uses the Gemini Free Tier model gemini-3.8-flash and does not enable paid billing.";
 const setupMessage =
-  "MiniMax credentials are missing. Add a MiniMax Global Pay-as-you-go API key as the server-side Replit Secret MINIMAX_API_KEY, then restart the app. An M Plan Subscription Key is a different credential.";
+  "MiniMax credentials are missing. Add a MiniMax Global API key as the server-side Replit Secret MINIMAX_API_KEY.";
 
 function getLegacyInlineHashes(html) {
   const hash = value => `'sha256-${createHash("sha256").update(value).digest("base64")}'`;
@@ -188,6 +191,70 @@ function normalizeProviderError(response, providerBody) {
   };
 }
 
+function normalizeGeminiError(response, providerBody) {
+  const providerStatus = String(providerBody?.error?.status || "").toUpperCase();
+  const providerMessage = String(providerBody?.error?.message || "").toLowerCase();
+
+  if (
+    providerMessage.includes("api key not valid") ||
+    providerMessage.includes("invalid api key") ||
+    providerStatus === "UNAUTHENTICATED"
+  ) {
+    return {
+      statusCode: 503,
+      code: "SETUP_REQUIRED",
+      message: "Gemini rejected GEMINI_API_KEY. Replace it with a valid Google AI Studio API key in Replit Secrets; do not enable paid billing.",
+    };
+  }
+
+  if (response.status === 429 || providerStatus === "RESOURCE_EXHAUSTED") {
+    return {
+      statusCode: 429,
+      code: "FREE_TIER_LIMIT",
+      message: "Gemini Free Tier rate or quota limit has been reached. No paid billing was enabled. Try again after the free quota resets.",
+    };
+  }
+
+  if (providerStatus === "PERMISSION_DENIED" || response.status === 403) {
+    return {
+      statusCode: 403,
+      code: "GEMINI_ACCESS_DENIED",
+      message: "Google denied access to Gemini for this key or model. Check Google AI Studio key access and Free Tier availability; this app will not enable paid billing.",
+    };
+  }
+
+  if (response.status === 404) {
+    return {
+      statusCode: 503,
+      code: "GEMINI_MODEL_UNAVAILABLE",
+      message: "The configured Gemini Free Tier model is unavailable to this API key.",
+    };
+  }
+
+  if (response.status === 400) {
+    return {
+      statusCode: 502,
+      code: "GEMINI_REQUEST_REJECTED",
+      message: "Gemini rejected the request format. No answer was generated.",
+    };
+  }
+
+  return {
+    statusCode: 502,
+    code: "GEMINI_UNAVAILABLE",
+    message: "Gemini could not complete this request. No answer was generated.",
+  };
+}
+
+function getGeminiAnswerText(providerBody) {
+  const parts = providerBody?.candidates?.[0]?.content?.parts;
+  if (!Array.isArray(parts)) return "";
+  return parts
+    .map((part) => (typeof part?.text === "string" ? part.text : ""))
+    .join("")
+    .trim();
+}
+
 function requestMinimax(path, options = {}) {
   const apiKey = process.env.MINIMAX_API_KEY?.trim();
   if (!apiKey) {
@@ -277,24 +344,42 @@ async function handleAssistantChat(request, response) {
     return;
   }
 
-  const messages = [
-    { role: "system", content: buildTutorInstructions(language, grade) },
-    ...cleanHistory(input.history),
-    { role: "user", content: message },
-  ];
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!apiKey) {
+    sendError(response, 503, "SETUP_REQUIRED", geminiSetupMessage);
+    return;
+  }
 
+  const contents = [
+    ...cleanHistory(input.history).map((item) => ({
+      role: item.role === "assistant" ? "model" : "user",
+      parts: [{ text: item.content }],
+    })),
+    { role: "user", parts: [{ text: message }] },
+  ];
+  const model = geminiModel;
   try {
-    const providerResponse = await requestMinimax("/v1/chat/completions", {
+    const providerResponse = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": apiKey,
+      },
       body: JSON.stringify({
-        model: process.env.MINIMAX_MODEL || "MiniMax-M3",
-        messages,
-        temperature: 0.35,
-        max_tokens: 1_000,
+        systemInstruction: {
+          parts: [{ text: buildTutorInstructions(language, grade) }],
+        },
+        contents,
+        generationConfig: {
+          temperature: 0.35,
+          maxOutputTokens: 1_000,
+        },
       }),
       signal: AbortSignal.timeout(45_000),
-    });
+      },
+    );
 
     let providerBody = null;
     try {
@@ -303,39 +388,41 @@ async function handleAssistantChat(request, response) {
       providerBody = null;
     }
 
-    const providerCode = Number(providerBody?.base_resp?.status_code);
-    if (!providerResponse.ok || (Number.isFinite(providerCode) && providerCode !== 0)) {
-      console.warn("[assistant] MiniMax chat request rejected.", {
+    if (!providerResponse.ok) {
+      console.warn("[assistant] Gemini chat request rejected.", {
         httpStatus: providerResponse.status,
-        providerCode: Number.isFinite(providerCode) ? providerCode : null,
-        errorType:
-          typeof providerBody?.error?.type === "string"
-            ? providerBody.error.type.slice(0, 60)
-            : null,
-        model: process.env.MINIMAX_MODEL || "MiniMax-M3",
+        providerStatus: providerBody?.error?.status || null,
+        model,
       });
-      const failure = normalizeProviderError(providerResponse, providerBody);
+      const failure = normalizeGeminiError(providerResponse, providerBody);
       sendError(response, failure.statusCode, failure.code, failure.message);
       return;
     }
 
-    const answer = getAnswerText(providerBody);
+    const blockReason = providerBody?.promptFeedback?.blockReason;
+    if (blockReason) {
+      sendError(
+        response,
+        422,
+        "GEMINI_PROMPT_BLOCKED",
+        "Gemini could not answer this prompt under its safety rules. Try rephrasing the question.",
+      );
+      return;
+    }
+
+    const answer = getGeminiAnswerText(providerBody);
     if (!answer) {
       sendError(
         response,
         502,
-        "EMPTY_PROVIDER_RESPONSE",
-        "The tutor returned an empty answer. Please try asking in a different way.",
+        "EMPTY_GEMINI_RESPONSE",
+        "Gemini returned no answer. Please try asking in a different way.",
       );
       return;
     }
 
     sendJson(response, 200, { answer });
   } catch (error) {
-    if (error?.code === "SETUP_REQUIRED") {
-      sendError(response, 503, "SETUP_REQUIRED", setupMessage);
-      return;
-    }
     if (error?.name === "TimeoutError" || error?.name === "AbortError") {
       sendError(
         response,
@@ -346,73 +433,31 @@ async function handleAssistantChat(request, response) {
       return;
     }
 
-    console.error("[assistant] MiniMax request failed.", { name: error?.name || "Error" });
+    console.error("[assistant] Gemini request failed.", { name: error?.name || "Error" });
     sendError(
       response,
       502,
       "TUTOR_UNAVAILABLE",
-      "The tutor could not connect right now. Please try again shortly.",
+      "Gemini could not connect right now. Please try again shortly.",
     );
   }
 }
 
 async function handleAssistantStatus(response) {
-  if (!process.env.MINIMAX_API_KEY?.trim()) {
+  if (!process.env.GEMINI_API_KEY?.trim()) {
     sendJson(response, 200, {
-      provider: "minimax",
+      provider: "gemini",
       configured: false,
       code: "SETUP_REQUIRED",
-      message: setupMessage,
+      message: geminiSetupMessage,
     });
     return;
   }
-  try {
-    const providerResponse = await requestMinimax("/v1/models", {
-      method: "GET",
-      headers: { Accept: "application/json" },
-      signal: AbortSignal.timeout(10_000),
-    });
-
-    let providerBody = null;
-    try {
-      providerBody = await providerResponse.json();
-    } catch {
-      providerBody = null;
-    }
-
-    const providerCode = Number(providerBody?.base_resp?.status_code);
-    if (!providerResponse.ok || (Number.isFinite(providerCode) && providerCode !== 0)) {
-      const failure = normalizeProviderError(providerResponse, providerBody);
-      const unavailableMessage =
-        failure.code === "SETUP_REQUIRED"
-          ? failure.message
-          : "MiniMax could not be reached right now. Refresh this page and try again.";
-      sendJson(response, 200, {
-        provider: "minimax",
-        configured: false,
-        code: failure.code,
-        message: unavailableMessage,
-      });
-      return;
-    }
-
-    sendJson(response, 200, {
-      provider: "minimax",
-      configured: true,
-      message: "MiniMax credentials are accepted. Chat availability still depends on the account's available API usage.",
-    });
-  } catch (error) {
-    const message = error?.code === "SETUP_REQUIRED"
-      ? setupMessage
-      : "MiniMax could not be reached right now. Refresh this page and try again.";
-    sendJson(response, 200, {
-      provider: "minimax",
-      configured: false,
-      code:
-        message === setupMessage ? "SETUP_REQUIRED" : "PROVIDER_UNAVAILABLE",
-      message,
-    });
-  }
+  sendJson(response, 200, {
+    provider: "gemini",
+    configured: true,
+    message: "Gemini API key is saved. A real chat request is required to verify access and free-tier quota.",
+  });
 }
 
 function publicFilePath(pathname) {

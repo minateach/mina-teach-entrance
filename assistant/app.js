@@ -391,12 +391,12 @@ async function checkAssistantStatus() {
         ? false
         : null;
     if (providerConfigured) {
-      setStatus("ready", "Tutor configured");
+      setStatus("ready", "Gemini key configured");
     } else if (providerConfigured === false) {
       setStatus(
         "missing",
         "Tutor unavailable",
-        "MiniMax configuration required",
+        "Gemini configuration required",
         result.message || "AI tutoring is temporarily unavailable. Your saved study sessions are still here; please try again later."
       );
     } else {
@@ -525,8 +525,8 @@ async function sendMessage(rawMessage, isRetry = false) {
     retryMessage = messageText;
     retryError = error.message || "Please check your connection and try again.";
     if (error.code === "SETUP_REQUIRED") providerConfigured = false;
-    if (error.code === "BILLING_REQUIRED") {
-      setStatus("error", "Usage unavailable", "MiniMax has no available API usage", retryError);
+    if (error.code === "FREE_TIER_LIMIT") {
+      setStatus("error", "Free Tier limit reached", "Gemini Free Tier is temporarily unavailable", retryError);
     } else {
       setStatus(
         providerConfigured === false ? "missing" : "error",
