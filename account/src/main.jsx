@@ -17,14 +17,14 @@ const localKeys = {
 };
 const appearance = {
   theme: shadcn,
-  options: { logoPlacement: "inside", logoLinkUrl: "/", logoImageUrl: `${window.location.origin}/assistant/brand-logo.jpg` },
+  options: { logoPlacement: "inside", logoLinkUrl: "/", logoImageUrl: `${window.location.origin}/images/0_1000107983_1794514022860.png` },
   variables: { colorPrimary: "#1d4c9c", colorForeground: "#172541", colorBackground: "#ffffff", colorInput: "#ffffff", colorInputForeground: "#172541", colorDanger: "#b42318", colorNeutral: "#53627b", fontFamily: "Inter, system-ui, sans-serif", borderRadius: "0.75rem" },
 };
 function stripBase(path) { return basePath && path.startsWith(basePath) ? path.slice(basePath.length) || "/" : path; }
 
 function AuthPage({ mode }) {
   const isSignIn = mode === "in";
-  return <div className="auth-shell"><a className="brand" href="/"><img className="brand-logo" src="/assistant/brand-logo.jpg" alt="" /><span><b>MINA TEACH AI</b><small>Dhaloota beekumsa omishuudha.</small></span></a><h1>{isSignIn ? "Welcome back" : "Create your student account"}</h1><p>Your learning history will be private to your account.</p>{isSignIn
+  return <div className="auth-shell"><a className="brand" href="/"><img className="brand-logo" src="/images/0_1000107983_1794514022860.png" srcSet="/images/mina-teach-ai-logo-256.png 256w, /images/mina-teach-ai-logo-512.png 512w, /images/mina-teach-ai-logo-1024.png 1024w" sizes="64px" alt="Dambi Dollo University and Mina Teach AI logo" /><span><b>MINA TEACH AI</b><small>Dhaloota beekumsa omishuudha.</small></span></a><h1>{isSignIn ? "Welcome back" : "Create your student account"}</h1><p>Your learning history will be private to your account.</p>{isSignIn
     ? <SignIn routing="path" path={`${basePath}/sign-in`} signUpUrl={`${basePath}/sign-up`} />
     : <SignUp routing="path" path={`${basePath}/sign-up`} signInUrl={`${basePath}/sign-in`} />}</div>;
 }
@@ -54,7 +54,7 @@ function AccountPage() {
       setStatus("Your account data is stored securely for your signed-in account.");
     }).catch(error => setStatus(error.message));
   }, [isLoaded, user]);
-  if (!isLoaded) return <main className="account loading-account"><a className="brand" href="/"><img className="brand-logo" src="/assistant/brand-logo.jpg" alt="" /><span><b>MINA TEACH AI</b><small>Dhaloota beekumsa omishuudha.</small></span></a><p>Loading account…</p></main>;
+  if (!isLoaded) return <main className="account loading-account"><a className="brand" href="/"><img className="brand-logo" src="/images/0_1000107983_1794514022860.png" srcSet="/images/mina-teach-ai-logo-256.png 256w, /images/mina-teach-ai-logo-512.png 512w, /images/mina-teach-ai-logo-1024.png 1024w" sizes="64px" alt="Dambi Dollo University and Mina Teach AI logo" /><span><b>MINA TEACH AI</b><small>Dhaloota beekumsa omishuudha.</small></span></a><p>Loading account…</p></main>;
   if (!user) return <Redirect to="/sign-in" />;
   const saveRecord = async (type, data) => request(`/api/account/data/${type}`, { method: "PUT", body: JSON.stringify({ data }) });
   const importLocal = async () => {
@@ -106,7 +106,7 @@ function AccountPage() {
   };
   const count = value => Array.isArray(value) ? value.length : value && typeof value === "object" ? Object.keys(value).length : 0;
   return <main className="account">
-    <header className="account-header"><a className="brand" href="/"><img className="brand-logo" src="/assistant/brand-logo.jpg" alt="" /><span><b>MINA TEACH AI</b><small>Dhaloota beekumsa omishuudha.</small></span></a><div><a href="/learning/">Learning</a><a href="/assistant/">AI Assistant</a><button onClick={() => signOut({ redirectUrl: "/" })}>Sign out</button></div></header>
+    <header className="account-header"><a className="brand" href="/"><img className="brand-logo" src="/images/0_1000107983_1794514022860.png" srcSet="/images/mina-teach-ai-logo-256.png 256w, /images/mina-teach-ai-logo-512.png 512w, /images/mina-teach-ai-logo-1024.png 1024w" sizes="64px" alt="Dambi Dollo University and Mina Teach AI logo" /><span><b>MINA TEACH AI</b><small>Dhaloota beekumsa omishuudha.</small></span></a><div><a href="/learning/">Learning</a><a href="/assistant/">AI Assistant</a><button onClick={() => signOut({ redirectUrl: "/" })}>Sign out</button></div></header>
     <section className="account-card">
       <p className="eyebrow">STUDENT ACCOUNT</p><h1>Hello, {user.firstName || "student"}</h1><p className="muted">{user.primaryEmailAddress?.emailAddress}</p><p className="status" role="status">{status}</p>
       <form onSubmit={saveProfile} className="preferences"><label>Profile name<input value={profileName} maxLength={100} onChange={event => setProfileName(event.target.value)} required /></label><button disabled={busy}>Save profile</button></form>

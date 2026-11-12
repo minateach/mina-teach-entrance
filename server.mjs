@@ -472,6 +472,12 @@ async function handleAssistantStatus(response) {
 function publicFilePath(pathname) {
   if (pathname === "/" || pathname === "/index.html") return "index.html";
   if (pathname === "/manifest.webmanifest") return "manifest.webmanifest";
+  if (pathname.startsWith("/images/")) {
+    const imageName = pathname.slice("/images/".length);
+    return /^[A-Za-z0-9._-]+\.(?:png|jpe?g|webp)$/i.test(imageName)
+      ? `public/images/${imageName}`
+      : null;
+  }
   if (pathname === "/assistant" || pathname === "/assistant/") {
     return "assistant/index.html";
   }
@@ -522,6 +528,7 @@ async function serveStatic(pathname, request, response) {
       ".webmanifest": "application/manifest+json; charset=utf-8",
       ".png": "image/png",
       ".jpg": "image/jpeg",
+      ".webp": "image/webp",
       ".webp": "image/webp",
     };
 

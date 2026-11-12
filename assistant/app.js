@@ -245,8 +245,10 @@ function createWelcome() {
 
   const logo = document.createElement("img");
   logo.className = "welcome-logo";
-  logo.src = "/assistant/brand-logo.jpg";
-  logo.alt = "";
+  logo.src = "/images/0_1000107983_1794514022860.png";
+  logo.srcset = "/images/mina-teach-ai-logo-256.png 256w, /images/mina-teach-ai-logo-512.png 512w, /images/mina-teach-ai-logo-1024.png 1024w";
+  logo.sizes = "(max-width: 640px) 180px, 220px";
+  logo.alt = "Dambi Dollo University and Mina Teach AI logo";
 
   const kicker = document.createElement("div");
   kicker.className = "welcome-kicker";
