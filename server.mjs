@@ -948,8 +948,8 @@ app.post("/api/exams", requireAuth, async (request, response) => {
     const { where, params } = questionFilters(input || {});
     const available = await pool.query(`SELECT COUNT(*)::int AS count FROM mina_questions ${where}`, params);
     const count = available.rows[0].count;
-    if (!count) { sendError(response, 409, "QUESTION_BANK_EMPTY", "No reviewed questions match these choices yet."); return; }
-    const total = Math.min(60, count);
+    if (count < 60) { sendError(response, 409, "QUESTION_BANK_INSUFFICIENT", `A 60-question exam requires at least 60 approved matches; only ${count} are available.`); return; }
+    const total = 60;
     const selected = await pool.query(`SELECT id,grade,stream,subject,chapter,prompt,choices,difficulty,source_label,source_kind FROM mina_questions ${where} ORDER BY random() LIMIT $${params.length + 1}`, [...params, total]);
     const ids = selected.rows.map(row => String(row.id));
     const attempt = await pool.query("INSERT INTO mina_exam_attempts (user_id,grade,stream,subject,difficulty,question_ids,total,score) VALUES ($1,$2,$3,$4,$5,$6::bigint[],$7,0) RETURNING id,started_at", [request.userId, Number(input.grade), input.stream, input.subject || null, input.difficulty || null, ids, total]);
@@ -964,22 +964,33 @@ app.post("/api/exams/:id/submit", requireAuth, async (request, response) => {
     if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
     const attempt = await pool.query("SELECT * FROM mina_exam_attempts WHERE id = $1 AND user_id = $2", [request.params.id, request.userId]);
     if (!attempt.rowCount) { sendError(response, 404, "ATTEMPT_NOT_FOUND", "This exam attempt was not found."); return; }
-    if (attempt.rows[0].submitted_at) { sendError(response, 409, "ALREADY_SUBMITTED", "This exam attempt has already been submitted."); return; }
-    const input = await readJsonBody(request);
-    const answers = input?.answers;
-    if (!answers || typeof answers !== "object" || Array.isArray(answers)) { sendError(response, 400, "INVALID_ANSWERS", "Submit a choice for each question."); return; }
     const ids = attempt.rows[0].question_ids.map(String);
     const rows = await pool.query("SELECT id,grade,stream,subject,chapter,prompt,choices,correct_index,explanation,difficulty,source_label,source_kind FROM mina_questions WHERE id = ANY($1::bigint[])", [ids]);
     const byId = new Map(rows.rows.map(row => [String(row.id), row]));
-    let score = 0;
-    const review = ids.map(id => {
+    const makeReview = answers => ids.map(id => {
       const question = byId.get(id);
       const choice = Number.isInteger(answers[id]) && answers[id] >= 0 && answers[id] < 4 ? answers[id] : null;
-      const correct = choice === question.correct_index;
-      if (correct) score += 1;
-      return { ...publicQuestion(question), selectedIndex: choice, correctIndex: question.correct_index, explanation: question.explanation, isCorrect: correct };
+      return { ...publicQuestion(question), selectedIndex: choice, correctIndex: question.correct_index, explanation: question.explanation, isCorrect: choice === question.correct_index };
     });
-    await pool.query("UPDATE mina_exam_attempts SET answers=$1::jsonb,score=$2,submitted_at=NOW() WHERE id=$3 AND user_id=$4", [JSON.stringify(answers), score, request.params.id, request.userId]);
+    if (attempt.rows[0].submitted_at) {
+      const savedAnswers = attempt.rows[0].answers || {};
+      const savedScore = Number(attempt.rows[0].score) || 0;
+      sendJson(response, 200, { score: savedScore, total: ids.length, percentage: Math.round(savedScore / ids.length * 100), review: makeReview(savedAnswers) });
+      return;
+    }
+    const input = await readJsonBody(request);
+    const answers = input?.answers;
+    if (!answers || typeof answers !== "object" || Array.isArray(answers)) { sendError(response, 400, "INVALID_ANSWERS", "Submit a choice for each question."); return; }
+    const review = makeReview(answers);
+    const score = review.filter(question => question.isCorrect).length;
+    const saved = await pool.query("UPDATE mina_exam_attempts SET answers=$1::jsonb,score=$2,submitted_at=NOW() WHERE id=$3 AND user_id=$4 AND submitted_at IS NULL RETURNING id", [JSON.stringify(answers), score, request.params.id, request.userId]);
+    if (!saved.rowCount) {
+      const completed = await pool.query("SELECT answers,score,submitted_at FROM mina_exam_attempts WHERE id=$1 AND user_id=$2", [request.params.id, request.userId]);
+      if (!completed.rowCount || !completed.rows[0].submitted_at) { sendError(response, 409, "ALREADY_SUBMITTED", "This exam attempt has already been submitted."); return; }
+      const savedScore = Number(completed.rows[0].score) || 0;
+      sendJson(response, 200, { score: savedScore, total: ids.length, percentage: Math.round(savedScore / ids.length * 100), review: makeReview(completed.rows[0].answers || {}) });
+      return;
+    }
     sendJson(response, 200, { score, total: ids.length, percentage: Math.round(score / ids.length * 100), review });
   } catch {
     sendError(response, 500, "EXAM_SUBMIT_FAILED", "The result could not be saved.");
