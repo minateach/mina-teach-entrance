@@ -7,7 +7,8 @@
     "prestart": "npm run build:account",
     "build:account": "vite build --config vite.account.config.mjs",
     "start": "node server.mjs",
-    "test": "npm run build:account && node --check server.mjs && node --check assistant/app.js && node --check learning/app.js && node --check exams/app.js && node --check admin/app.js"
+    "test:history-browser": "node tests/history-browser-check.mjs",
+    "test": "npm run build:account && node --check server.mjs && node --check assistant/app.js && node --check learning/app.js && node --check learning/history-grade10.js && node --check exams/app.js && node --check admin/app.js && node --test tests/*.test.mjs"
   },
   "repository": {
     "type": "git",

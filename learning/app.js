@@ -31,8 +31,8 @@
   function load() {
     try {
       const parsed = JSON.parse(localStorage.getItem(KEY) || "{}");
-      return { settings: parsed.settings || { grade: "9", stream: "natural" }, completed: parsed.completed || [], saved: parsed.saved || [], tasks: parsed.tasks || [] };
-    } catch { return { settings: { grade: "9", stream: "natural" }, completed: [], saved: [], tasks: [] }; }
+      return { settings: parsed.settings || { grade: "9", stream: "natural" }, completed: parsed.completed || [], saved: parsed.saved || [], tasks: parsed.tasks || [], practice: Array.isArray(parsed.practice) ? parsed.practice : [] };
+    } catch { return { settings: { grade: "9", stream: "natural" }, completed: [], saved: [], tasks: [], practice: [] }; }
   }
   function persist() {
     localStorage.setItem(KEY, JSON.stringify(state));
@@ -49,6 +49,9 @@
     return Object.entries(subjects).filter(([name]) => (stream.value === "natural" ? natural : social).has(name));
   }
   function renderSubjects() {
+    const isHistoryCurriculum = requestedSubject === "History" && grade.value === "10" && !!window.MINA_G10_HISTORY;
+    document.querySelector(".content-grid").classList.toggle("history-mode", isHistoryCurriculum);
+    document.querySelector(".subjects-panel > .notice").hidden = isHistoryCurriculum;
     $("grade-label").textContent = grade.value;
     $("stream-label").textContent = stream.value === "natural" ? "NATURAL SCIENCE" : "SOCIAL SCIENCE";
     if (requestedSubject && subjects[requestedSubject]) {
@@ -59,7 +62,7 @@
     }
     document.querySelectorAll(".welcome,.stats,.lesson-library,.planner,.saved-panel,footer").forEach(node=>{node.hidden=false;});
     const root = $("subjects");
-    root.classList.remove("subject-detail");
+    root.classList.remove("subject-detail", "history-curriculum");
     root.replaceChildren();
     visibleSubjects().forEach(([name, topics]) => {
       const done = topics.filter((_, i) => state.completed.includes(`${scopeKey()}:${name}:${i}`)).length;
@@ -81,6 +84,7 @@
       return;
     }
     const root=$("subjects");root.replaceChildren();
+    root.classList.remove("history-curriculum");
     root.classList.add("subject-detail");
     const back=document.createElement("a");back.className="button-secondary";back.textContent="← All subjects";back.href=`/learning/?${new URLSearchParams({grade:grade.value,stream:stream.value})}`;
     back.addEventListener("click",event=>{event.preventDefault();requestedSubject=null;history.pushState({}, "", back.href);renderSubjects();});
@@ -103,6 +107,11 @@
     const root = $("subjects");
     const curriculum = window.MINA_G10_HISTORY;
     const lessons = curriculum.completeLessons;
+    const requestedLesson = new URLSearchParams(location.search).get("lesson");
+    if (lessonIndex === null && requestedLesson) {
+      const index = lessons.findIndex(lesson => lesson.number === requestedLesson);
+      if (index >= 0) lessonIndex = index;
+    }
     root.replaceChildren();
     root.classList.add("subject-detail", "history-curriculum");
     const back = document.createElement("a");
@@ -127,23 +136,39 @@
     root.append(citation);
 
     if (lessonIndex === null) {
-      const unit = document.createElement("article");
-      unit.className = "history-unit-card";
-      const unitTitle = document.createElement("p");
-      unitTitle.className = "eyebrow"; unitTitle.textContent = `UNIT ${lessons[0].unit}`;
-      const title = document.createElement("h3"); title.textContent = lessons[0].unitTitle;
-      const note = document.createElement("p");
-      note.className = "muted";
-      note.textContent = `${lessons.length} complete lesson currently available. Other textbook sections are not shown as finished lessons until their full learning content is ready.`;
-      const open = document.createElement("button");
-      open.type = "button"; open.textContent = `Open lesson ${lessons[0].number}: ${lessons[0].title}`;
-      open.addEventListener("click", () => renderGrade10History(0));
-      unit.append(unitTitle, title, note, open); root.append(unit);
+      const coverage = document.createElement("p");
+      coverage.className = "notice";
+      coverage.textContent = "Current coverage: Unit 1 only. Units 2–9 are not yet implemented. These original AI-authored lessons and practice questions are separate from the educator-reviewed exam bank.";
+      root.append(coverage);
+      const units = [...new Set(lessons.map(lesson => lesson.unit))];
+      units.forEach(unitNumber => {
+        const unitLessons = lessons.filter(lesson => lesson.unit === unitNumber);
+        const unit = document.createElement("details"); unit.open = true;
+        unit.className = "history-unit-card";
+        const summary = document.createElement("summary");
+        summary.textContent = `Unit ${unitNumber} · ${unitLessons[0].unitTitle}`;
+        const note = document.createElement("p"); note.className = "muted";
+        note.textContent = `${unitLessons.length} learning pages · ${unitLessons.reduce((sum, lesson) => sum + lesson.questions.length, 0)} original practice questions`;
+        unit.append(summary, note);
+        unitLessons.forEach(lesson => {
+          const open = document.createElement("a"); open.className = "history-lesson-link";
+          open.href = `/learning/?${new URLSearchParams({grade: "10", stream: "social", subject: "History", lesson: lesson.number})}`;
+          open.textContent = `${lesson.number} · ${lesson.title}${state.completed.includes(`curriculum:history:10:${lesson.number}`) ? " · Completed ✓" : ""}`;
+          unit.append(open);
+        });
+        root.append(unit);
+      });
       return;
     }
 
     const lesson = lessons[lessonIndex];
     const key = `curriculum:history:10:${lesson.number}`;
+    const lessonUrl = new URL(location.href); lessonUrl.searchParams.set("lesson", lesson.number);
+    history.replaceState({}, "", lessonUrl);
+    const contents = document.createElement("a"); contents.className = "button-secondary";
+    const contentsUrl = new URL(location.href); contentsUrl.searchParams.delete("lesson");
+    contents.href = contentsUrl.pathname + contentsUrl.search; contents.textContent = "← Unit contents";
+    root.append(contents);
     const title = document.createElement("h3");
     title.textContent = `Unit ${lesson.unit} · Lesson ${lesson.number}: ${lesson.title}`;
     root.append(title);
@@ -192,13 +217,18 @@
       persist(); renderSaved(); updateStats(); save.textContent = index >= 0 ? "☆ Save lesson" : "★ Saved lesson";
     });
     const complete = document.createElement("button"); complete.type = "button";
-    complete.disabled = true; complete.textContent = "Mark complete";
+    complete.textContent = state.completed.includes(key) ? "Completed ✓" : "Mark complete";
     complete.setAttribute("aria-describedby", "history-review-note");
+    complete.addEventListener("click", () => {
+      if (!state.completed.includes(key)) state.completed.push(key);
+      persist(); updateStats(); complete.textContent = "Completed ✓";
+      note.textContent = "Study completion saved. This records your progress, not an official assessment or educator approval.";
+    });
     const practice = document.createElement("button"); practice.type = "button";
     practice.textContent = "Practice questions";
     const note = document.createElement("p");
     note.id = "history-review-note"; note.className = "muted";
-    note.textContent = "Completion stays locked until an educator review is recorded for this original lesson.";
+    note.textContent = "You have opened the actual lesson content. Mark complete after studying it. Educator review of this AI-authored material is still pending.";
     actions.append(save, complete, practice); root.append(actions, note);
 
     const quiz = document.createElement("section");
@@ -208,6 +238,9 @@
     const showQuestion = () => {
       quiz.replaceChildren();
       if (questionIndex >= lesson.questions.length) {
+        state.practice.unshift({id: crypto.randomUUID(), lesson: lesson.number, subject: "History", grade: 10, score, total: lesson.questions.length, completedAt: new Date().toISOString(), kind: "ai_authored"});
+        state.practice = state.practice.slice(0, 50);
+        persist(); loadQuizProgress();
         const h = document.createElement("h4"); h.textContent = `Practice complete · ${score} / ${lesson.questions.length}`;
         const retry = document.createElement("button"); retry.type = "button"; retry.textContent = "Try again";
         retry.addEventListener("click", () => { questionIndex = 0; score = 0; answered = false; showQuestion(); });
@@ -219,13 +252,13 @@
       const feedback = document.createElement("p"); feedback.className = "quiz-feedback"; feedback.hidden = true;
       q.choices.forEach((choice, index) => {
         const button = document.createElement("button"); button.type = "button";
-        button.className = "history-choice"; button.textContent = `${String.fromCharCode(65 + index)}. ${choice}`;
+        button.className = "history-choice"; button.textContent = `${String.fromCharCode(65 + index)}. ${choice.replace(/^[A-D]\.\s*/, "")}`;
         button.addEventListener("click", () => {
           if (answered) return;
           answered = true;
           const correct = index === q.answer; if (correct) score++;
           feedback.hidden = false;
-          feedback.textContent = `${correct ? "Correct." : "Not quite."} ${q.explanation}`;
+          feedback.textContent = `${correct ? "Correct." : "Not quite."} Correct answer: ${String.fromCharCode(65 + q.answer)}. ${q.choices[q.answer].replace(/^[A-D]\.\s*/, "")} ${q.explanation}`;
           const next = document.createElement("button"); next.type = "button";
           next.textContent = questionIndex === lesson.questions.length - 1 ? "See score" : "Next question";
           next.addEventListener("click", () => { questionIndex++; answered = false; showQuestion(); });
@@ -309,10 +342,24 @@
   }
   async function loadQuizProgress() {
     const root=$("quiz-progress");
+    root.replaceChildren();
+    state.practice.slice(0,8).forEach(attempt=>{
+      const item=document.createElement("p");
+      item.textContent=`AI-authored practice · Grade ${attempt.grade} ${attempt.subject} · Lesson ${attempt.lesson} · ${attempt.score}/${attempt.total}`;
+      root.append(item);
+    });
+    if (!accountSyncEnabled) {
+      const note = document.createElement("p");
+      note.textContent = state.practice.length
+        ? "These practice scores are stored on this device. Sign in to sync learning data and view exam results."
+        : "Sign in to save and view exam scores. Original lesson practice scores can be kept on this device.";
+      root.append(note);
+      return;
+    }
     try{const r=await fetch("/api/exams/history",{credentials:"same-origin"});const data=await r.json();if(!r.ok)throw new Error(data?.error?.message||"Sign in to view saved quiz results.");
-      root.replaceChildren();if(!data.attempts.length){root.textContent="No saved quiz results yet. Start a practice set to record your score.";return;}
+      if(!data.attempts.length&&!state.practice.length){root.textContent="No saved quiz results yet. Start a practice set to record your score.";return;}
       data.attempts.slice(0,8).forEach(attempt=>{const item=document.createElement("p");item.textContent=`Grade ${attempt.grade} · ${attempt.subject||"All subjects"} · ${attempt.score}/${attempt.total}`;root.append(item);});
-    }catch{root.textContent="Sign in to save and view quiz scores.";}
+    }catch{const note=document.createElement("p");note.textContent=state.practice.length?"These practice scores are stored on this device. Sign in to sync learning data and view exam results.":"Sign in to save and view exam scores. Original lesson practice scores can be kept on this device.";root.append(note);}
   }
   $("save-lesson").addEventListener("click", () => {
     if (!current) return;
@@ -335,7 +382,11 @@
     if (!state.saved.length) { const empty = document.createElement("p"); empty.className = "muted"; empty.textContent = "Save a lesson from a subject to find it here."; root.append(empty); return; }
     state.saved.forEach((item, i) => {
       const chip = document.createElement("div"); chip.className = "saved-chip";
-      chip.append(document.createTextNode(`${item.subject}: ${item.title}`));
+      if (item.key?.startsWith("curriculum:history:10:")) {
+        const open = document.createElement("a");
+        open.href = `/learning/?${new URLSearchParams({grade:"10",stream:"social",subject:"History",lesson:item.key.slice("curriculum:history:10:".length)})}`;
+        open.textContent = `${item.subject}: ${item.title}`; chip.append(open);
+      } else chip.append(document.createTextNode(`${item.subject}: ${item.title}`));
       const remove = document.createElement("button"); remove.type = "button"; remove.textContent = "Remove"; remove.setAttribute("aria-label", `Remove ${item.title}`);
       remove.addEventListener("click", () => { state.saved.splice(i, 1); persist(); renderSaved(); updateStats(); });
       chip.append(remove); root.append(chip);
@@ -376,11 +427,11 @@
   lessonSubject.addEventListener("change",loadLessons);lessonLanguage.addEventListener("change",loadLessons);
   let searchTimer;lessonSearch.addEventListener("input",()=>{clearTimeout(searchTimer);searchTimer=setTimeout(loadLessons,250);});
   renderSubjects(); renderTasks(); renderSaved();
-  loadLessons();
+  loadLessons(); loadQuizProgress();
   (async()=>{
     try{
       const status=await fetch("/api/account/status",{credentials:"same-origin"}).then(r=>r.json());
-      if(!status.signedIn){$("quiz-progress").textContent="Sign in to save and view quiz scores.";return;}
+      if(!status.signedIn)return;
       const result=await fetch("/api/account/data",{credentials:"same-origin"}).then(r=>r.json());
       if (result.records?.learning && typeof result.records.learning === "object") {
         const remote = result.records.learning;
@@ -389,9 +440,10 @@
         const tasksByText = new Map([...(remote.tasks || []), ...state.tasks].map(item => [item.text, item]));
         state.saved = [...savedByKey.values()];
         state.tasks = [...tasksByText.values()];
+        state.practice = [...new Map([...(remote.practice || []), ...state.practice].map(item => [item.id, item])).values()].sort((a,b) => String(b.completedAt).localeCompare(String(a.completedAt))).slice(0,50);
         state.settings = { ...(remote.settings || {}), ...state.settings };
-        grade.value = String(state.settings.grade || "9");
-        stream.value = state.settings.stream || "natural";
+        if (!routeGrade) grade.value = String(state.settings.grade || "9");
+        if (!routeStream) stream.value = state.settings.stream || "natural";
       }
       accountSyncEnabled = true;
       persist(); renderSubjects(); renderTasks(); renderSaved(); loadLessons(); await loadQuizProgress();

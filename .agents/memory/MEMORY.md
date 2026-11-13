@@ -1,1 +1,2 @@
 - [Mina Teach brand and preservation](mina-teach-brand.md) — use the official name and exact slogan while extending, not replacing, the existing project.
+- [Curriculum authorship permission](curriculum-authorship.md) — author original lessons and questions from correct textbook references; do not wait for prepared lesson prose.
