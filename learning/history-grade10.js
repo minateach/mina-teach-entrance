@@ -1,4 +1,5 @@
-window.MINA_G10_HISTORY = {
+(() => {
+const curriculum = {
   source: {
     title: "History Student Textbook, Grade 10",
     publisher: "Federal Democratic Republic of Ethiopia, Ministry of Education",
@@ -72,7 +73,7 @@ window.MINA_G10_HISTORY = {
   }]
 };
 
-window.MINA_G10_HISTORY.completeLessons.push(
+curriculum.completeLessons.push(
   {
     unit: 1, unitTitle: "Development of Capitalism and Nationalism, 1815–1914",
     number: "1.2", title: "Features of Nationalism and Formation of Nation States",
@@ -204,3 +205,6 @@ window.MINA_G10_HISTORY.completeLessons.push(
     ]
   }
 );
+if (typeof module !== "undefined" && module.exports) module.exports = curriculum;
+if (typeof window !== "undefined") window.MINA_G10_HISTORY = curriculum;
+})();

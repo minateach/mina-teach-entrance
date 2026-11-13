@@ -6,6 +6,7 @@ import express from "express";
 import { clerkClient, clerkMiddleware, getAuth } from "@clerk/express";
 import { publishableKeyFromHost } from "@clerk/shared/keys";
 import pg from "pg";
+import { createLearningCatalog, LearningInputError } from "./server/learning-catalog.mjs";
 import { CLERK_PROXY_PATH, clerkProxyMiddleware, getClerkProxyHost } from "./server/middlewares/clerkProxyMiddleware.mjs";
 
 const projectRoot = resolve(fileURLToPath(new URL(".", import.meta.url)));
@@ -19,6 +20,7 @@ const supportedGrades = new Set([9, 10, 11, 12]);
 const supportedLanguages = new Set(["auto", "en", "am", "om"]);
 const { Pool } = pg;
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const learningCatalog = createLearningCatalog(pool);
 const allowedRecordTypes = new Set(["conversations", "learning", "preferences"]);
 const chatRateWindows = new Map();
 const chatRateWindowMs = 60_000;
@@ -528,7 +530,7 @@ function publicFilePath(pathname) {
   const allowedTopLevelFiles = new Set(["/Index.html", "/Index.HTml"]);
   if (allowedTopLevelFiles.has(pathname)) return pathname.slice(1);
   if (pathname.startsWith("/assistant/")) return pathname.slice(1);
-  if (new Set(["/learning/app.js", "/learning/styles.css", "/learning/library.css", "/learning/history-grade10.js"]).has(pathname)) {
+  if (new Set(["/learning/app.js", "/learning/styles.css", "/learning/library.css", "/learning/history-grade10.js", "/learning/dashboard.js", "/learning/learning-state.js", "/learning/lesson-view.js"]).has(pathname)) {
     return pathname.slice(1);
   }
   return null;
@@ -704,8 +706,8 @@ app.get("/api/account/status", async (request, response) => {
     await ensureStudentRole(userId);
     await bootstrapFirstAdmin(userId);
     const result = await pool.query("SELECT role FROM mina_user_roles WHERE user_id=$1", [userId]);
-    sendJson(response, 200, { signedIn: true, role: result.rows[0]?.role || "student" });
-  } catch { sendJson(response, 200, { signedIn: true, role: "student" }); }
+    sendJson(response, 200, { signedIn: true, userId, role: result.rows[0]?.role || "student" });
+  } catch { sendError(response,503,"ACCOUNT_STATUS_FAILED","Account storage is temporarily unavailable. Please retry."); }
 });
 
 app.get("/api/educator/access", requireAuth, requireRole("teacher", "question_reviewer", "educator", "admin"), (_request, response) => {
@@ -724,6 +726,9 @@ app.put("/api/account/data/:type", requireAuth, async (request, response) => {
   }
   try {
     const input = await readJsonBody(request, 1_048_576);
+    if (type === "learning" && input?.expectedUserId !== undefined && input.expectedUserId !== request.userId) {
+      sendError(response,409,"ACCOUNT_CHANGED","Your signed-in account changed. Reload before syncing learning data."); return;
+    }
     const json = JSON.stringify(input?.data);
     if (!input || !input.data || typeof input.data !== "object" || !json || Buffer.byteLength(json) > 900_000) {
       sendError(response, 400, "INVALID_ACCOUNT_DATA", "Send a supported JSON object or list under 900 KB.");
@@ -810,7 +815,8 @@ function questionFilters(query, approvedOnly = true) {
   }
   if (query.stream) {
     if (!questionStreams.has(query.stream)) throw new Error("Choose Natural Science or Social Science.");
-    add("stream", query.stream);
+    if (query.stream === "common") add("stream",query.stream);
+    else { params.push(query.stream); clauses.push(`stream IN ($${params.length},'common')`); }
   }
   if (query.subject) add("subject", String(query.subject).slice(0, 80));
   if (query.topic) {
@@ -859,15 +865,28 @@ function lessonValues(input, userId) {
     input.sourceLabel.trim(), input.sourceUrl || null, userId];
 }
 
+for (const [path, handler] of [["catalog","catalog"],["course","course"]]) {
+  app.get(`/api/learning/${path}`, async (request,response)=>{
+    try { sendJson(response,200,await learningCatalog[handler](request.query)); }
+    catch(error) { sendError(response,error instanceof LearningInputError?400:503,"LEARNING_LOAD_FAILED",error instanceof LearningInputError?error.message:"Learning content could not be loaded. Please retry."); }
+  });
+}
+app.get("/api/learning/content/:id",async(request,response)=>{
+  try {
+    const lesson=await learningCatalog.lesson(request.params.id);
+    if (!lesson) { sendError(response,404,"LESSON_NOT_FOUND","This lesson is unavailable or has not been published."); return; }
+    sendJson(response,200,{lesson});
+  } catch(error) { sendError(response,error instanceof LearningInputError?400:503,"LESSON_LOAD_FAILED",error instanceof LearningInputError?error.message:"The lesson could not be loaded. Please retry."); }
+});
 app.get("/api/learning/lessons", async (request, response) => {
   try {
     const clauses = ["review_status='published'"], params = [];
     for (const [key, column] of [["grade", "grade"], ["stream", "stream"], ["subject", "subject"], ["language", "language"]]) {
       const value = request.query[key];
       if (value === undefined || value === "") continue;
-      if (key === "grade" && ![9, 10, 11, 12].includes(Number(value))) throw new Error("Choose Grade 9, 10, 11, or 12.");
-      if (key === "stream" && !questionStreams.has(value)) throw new Error("Choose a valid stream.");
-      if (key === "language" && !["en", "om", "am"].includes(value)) throw new Error("Choose English, Afaan Oromoo, or Amharic.");
+      if (key === "grade" && ![9, 10, 11, 12].includes(Number(value))) throw new LearningInputError("Choose Grade 9, 10, 11, or 12.");
+      if (key === "stream" && !questionStreams.has(value)) throw new LearningInputError("Choose a valid stream.");
+      if (key === "language" && !["en", "om", "am"].includes(value)) throw new LearningInputError("Choose English, Afaan Oromoo, or Amharic.");
       params.push(key === "grade" ? Number(value) : String(value).slice(0, 120));
       clauses.push(key === "stream" && value !== "common" ? `${column} IN ($${params.length},'common')` : `${column}=$${params.length}`);
     }
@@ -875,9 +894,15 @@ app.get("/api/learning/lessons", async (request, response) => {
       params.push(`%${String(request.query.search).trim().slice(0, 120)}%`);
       clauses.push(`(title ILIKE $${params.length} OR chapter ILIKE $${params.length} OR subject ILIKE $${params.length} OR content ILIKE $${params.length})`);
     }
-    const result = await pool.query(`SELECT id,grade,stream,subject,chapter,title,language,content,examples,key_points,source_label,source_url FROM mina_learning_lessons WHERE ${clauses.join(" AND ")} ORDER BY subject,chapter,title LIMIT 200`, params);
-    sendJson(response, 200, { lessons: result.rows.map(publicLesson) });
-  } catch (error) { sendError(response, 400, "LESSON_FILTER_INVALID", error.message || "Lessons could not be loaded."); }
+    const summary = request.query.summary === "1";
+    if (summary) clauses.push("length(trim(content))>=80 AND length(trim(source_label))>0");
+    const offset = Math.max(0,Math.min(100000,Number(request.query.offset)||0));
+    if (!Number.isInteger(offset)) throw new LearningInputError("Choose a valid page.");
+    const fields = summary ? "id,grade,stream,subject,chapter,title,language,source_label,source_url" : "id,grade,stream,subject,chapter,title,language,content,examples,key_points,source_label,source_url";
+    const limit = summary?20:200;
+    const result = await pool.query(`SELECT ${fields} FROM mina_learning_lessons WHERE ${clauses.join(" AND ")} ORDER BY subject,chapter,title,id LIMIT ${limit+1} OFFSET ${offset}`, params);
+    sendJson(response, 200, { lessons: result.rows.slice(0,limit).map(publicLesson),nextOffset:result.rows.length>limit?offset+limit:null });
+  } catch (error) { sendError(response, error instanceof LearningInputError ?400:503, "LESSON_LOAD_FAILED",error instanceof LearningInputError ?error.message:"Lessons could not be loaded. Please retry."); }
 });
 app.get("/api/learning/lessons/manage", requireAuth, requireRole(...contentRoles), async (_request, response) => {
   try {

@@ -36,13 +36,24 @@
         <label>Stream
           <select id="stream"><option value="natural">Natural Science</option><option value="social">Social Science</option></select>
         </label>
+        <label>Language
+          <select id="language"><option value="en">English</option><option value="om">Afaan Oromoo</option><option value="am">Amharic</option></select>
+        </label>
       </div>
     </section>
+    <section class="sync-notice" aria-label="Learning storage status">
+      <p id="sync-status" role="status">Checking your learning storage…</p>
+      <button id="retry-sync" type="button" class="button-secondary">Retry sync</button>
+      <button id="refresh-learning" type="button" class="button-secondary">Refresh content</button>
+      <a href="/account/">Sign in / Account</a>
+    </section>
+    <p id="coverage-status" class="muted" role="status">Loading available lesson counts…</p>
 
     <section class="stats" aria-label="Study summary">
       <article><span class="stat-icon">✓</span><div><strong id="completed-count">0</strong><small>Lessons completed</small></div></article>
+      <article><span class="stat-icon">→</span><div><strong id="remaining-count">0</strong><small>Available lessons remaining</small></div></article>
       <article><span class="stat-icon">◷</span><div><strong id="task-count">0</strong><small>Study tasks open</small></div></article>
-      <article><span class="stat-icon">☆</span><div><strong id="saved-count">0</strong><small>Saved lessons</small></div></article>
+      <article><span class="stat-icon">☆</span><div><strong id="saved-count">0</strong><small>Saved items, all grades</small></div></article>
     </section>
 
     <section class="panel lesson-library" aria-labelledby="lesson-library-title">
@@ -55,12 +66,13 @@
       </div>
       <p id="lesson-status" class="notice" role="status" aria-live="polite">Loading reviewed lessons…</p>
       <div id="lesson-list" class="lesson-list"></div>
+      <button id="load-more-lessons" type="button" class="button-secondary" hidden>Load more lessons</button>
     </section>
 
     <section class="content-grid">
       <div class="panel subjects-panel">
         <div class="section-heading"><div><p class="eyebrow">GRADE <span id="grade-label">9</span> · <span id="stream-label">NATURAL SCIENCE</span></p><h2>Subjects and lessons</h2></div></div>
-        <p class="notice">Topic lists are study organizers, not an official curriculum or past examination paper. Confirm chapter coverage with your current textbook and syllabus.</p>
+        <p class="notice">Browse actual available lessons. Availability does not mean a whole textbook is complete or officially approved. Stream preference does not hide subjects.</p>
         <div id="subjects" class="subject-grid"></div>
       </div>
 
@@ -70,6 +82,9 @@
         <form id="task-form"><label class="sr-only" for="task-input">Study task</label><input id="task-input" maxlength="120" placeholder="e.g. Review quadratic equations" required><button type="submit">Add task</button></form>
         <ul id="task-list" class="task-list"></ul>
       </aside>
+    </section>
+    <section class="panel saved-panel">
+      <h2>Bookmarked topics</h2><div id="bookmarked-topics" class="saved-list"></div>
     </section>
 
     <section class="panel saved-panel">
@@ -83,22 +98,6 @@
     <footer>MINA TEACH AI · Dhaloota beekumsa omishuudha.</footer>
   </main>
 
-  <dialog id="lesson-dialog">
-    <form method="dialog"><button class="dialog-close" aria-label="Close">×</button></form>
-    <p class="eyebrow" id="lesson-subject"></p><h2 id="lesson-title"></h2>
-    <p id="lesson-content" class="lesson-content"></p>
-    <section id="lesson-examples-wrap" hidden><h3>Examples</h3><ul id="lesson-examples"></ul></section>
-    <section id="lesson-points-wrap" hidden><h3>Important notes</h3><ul id="lesson-points"></ul></section>
-    <p id="lesson-source" class="muted"></p>
-    <p id="lesson-completion-note" class="muted" role="status"></p>
-    <div class="dialog-actions">
-      <button id="save-lesson" class="button-secondary">☆ Save lesson</button>
-      <button id="complete-lesson">Mark complete</button>
-      <a id="practice-lesson" class="button-secondary" href="/exams/">Practice questions</a>
-      <a class="button-secondary" href="/assistant/">Ask the AI tutor</a>
-    </div>
-  </dialog>
-  <script src="/learning/history-grade10.js" defer></script>
-  <script src="/learning/app.js" defer></script>
+  <script type="module" src="/learning/dashboard.js"></script>
 </body>
 </html>
