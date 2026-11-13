@@ -76,6 +76,10 @@
     updateStats();
   }
   function renderSubjectPage(subject) {
+    if (subject === "History" && grade.value === "10" && window.MINA_G10_HISTORY) {
+      renderGrade10History();
+      return;
+    }
     const root=$("subjects");root.replaceChildren();
     root.classList.add("subject-detail");
     const back=document.createElement("a");back.className="button-secondary";back.textContent="← All subjects";back.href=`/learning/?${new URLSearchParams({grade:grade.value,stream:stream.value})}`;
@@ -94,6 +98,150 @@
       row.append(text,open);root.append(row);
     });
     updateStats();
+  }
+  function renderGrade10History(lessonIndex = null) {
+    const root = $("subjects");
+    const curriculum = window.MINA_G10_HISTORY;
+    const lessons = curriculum.completeLessons;
+    root.replaceChildren();
+    root.classList.add("subject-detail", "history-curriculum");
+    const back = document.createElement("a");
+    back.className = "button-secondary";
+    back.href = `/learning/?${new URLSearchParams({grade: grade.value, stream: stream.value})}`;
+    back.textContent = "← All subjects";
+    back.addEventListener("click", event => {
+      event.preventDefault(); requestedSubject = null;
+      history.pushState({}, "", back.href); renderSubjects();
+    });
+    root.append(back);
+    const heading = document.createElement("h2");
+    heading.textContent = "Grade 10 · History";
+    root.append(heading);
+    const citation = document.createElement("p");
+    citation.className = "curriculum-source";
+    citation.append(document.createTextNode(`${curriculum.source.publisher}, ${curriculum.source.title} (${curriculum.source.edition}). `));
+    const sourceLink = document.createElement("a");
+    sourceLink.href = curriculum.source.url; sourceLink.target = "_blank";
+    sourceLink.rel = "noopener noreferrer"; sourceLink.textContent = "Open reference textbook";
+    citation.append(sourceLink, document.createTextNode(` ${curriculum.source.note}`));
+    root.append(citation);
+
+    if (lessonIndex === null) {
+      const unit = document.createElement("article");
+      unit.className = "history-unit-card";
+      const unitTitle = document.createElement("p");
+      unitTitle.className = "eyebrow"; unitTitle.textContent = `UNIT ${lessons[0].unit}`;
+      const title = document.createElement("h3"); title.textContent = lessons[0].unitTitle;
+      const note = document.createElement("p");
+      note.className = "muted";
+      note.textContent = `${lessons.length} complete lesson currently available. Other textbook sections are not shown as finished lessons until their full learning content is ready.`;
+      const open = document.createElement("button");
+      open.type = "button"; open.textContent = `Open lesson ${lessons[0].number}: ${lessons[0].title}`;
+      open.addEventListener("click", () => renderGrade10History(0));
+      unit.append(unitTitle, title, note, open); root.append(unit);
+      return;
+    }
+
+    const lesson = lessons[lessonIndex];
+    const key = `curriculum:history:10:${lesson.number}`;
+    const title = document.createElement("h3");
+    title.textContent = `Unit ${lesson.unit} · Lesson ${lesson.number}: ${lesson.title}`;
+    root.append(title);
+    const addSection = (headingText, content, className = "") => {
+      const section = document.createElement("section");
+      section.className = `history-lesson-section ${className}`.trim();
+      const h = document.createElement("h4"); h.textContent = headingText; section.append(h);
+      if (Array.isArray(content)) {
+        const list = document.createElement("ul");
+        content.forEach(item => {
+          const li = document.createElement("li");
+          if (Array.isArray(item)) {
+            const strong = document.createElement("strong"); strong.textContent = `${item[0]}: `;
+            li.append(strong, document.createTextNode(item[1]));
+          } else li.textContent = item;
+          list.append(li);
+        });
+        section.append(list);
+      } else {
+        const p = document.createElement("p"); p.textContent = content; section.append(p);
+      }
+      root.append(section);
+    };
+    addSection("Introduction", lesson.introduction);
+    addSection("Learning objectives", lesson.objectives);
+    lesson.topics.forEach(topic => {
+      addSection(topic.title, topic.notes);
+      addSection("Key terms", topic.terms, "compact-section");
+      addSection("Historical/economic example", topic.example, "example-section");
+    });
+    addSection("Practice exercises", lesson.exercises);
+    addSection("Lesson summary", lesson.summary);
+    addSection("Revision questions", lesson.revision);
+    const source = document.createElement("p");
+    source.className = "curriculum-source"; source.textContent = `Reference: ${curriculum.source.title}, Unit ${lesson.unit}, section ${lesson.number}. Original learning text; not copied from the textbook.`;
+    root.append(source);
+
+    const actions = document.createElement("div"); actions.className = "history-lesson-actions";
+    const save = document.createElement("button"); save.type = "button";
+    const savedIndex = state.saved.findIndex(item => item.key === key);
+    save.textContent = savedIndex >= 0 ? "★ Saved lesson" : "☆ Save lesson";
+    save.addEventListener("click", () => {
+      const index = state.saved.findIndex(item => item.key === key);
+      if (index >= 0) state.saved.splice(index, 1);
+      else state.saved.unshift({key, subject: "History", title: lesson.title});
+      persist(); renderSaved(); updateStats(); save.textContent = index >= 0 ? "☆ Save lesson" : "★ Saved lesson";
+    });
+    const complete = document.createElement("button"); complete.type = "button";
+    complete.disabled = true; complete.textContent = "Mark complete";
+    complete.setAttribute("aria-describedby", "history-review-note");
+    const practice = document.createElement("button"); practice.type = "button";
+    practice.textContent = "Practice questions";
+    const note = document.createElement("p");
+    note.id = "history-review-note"; note.className = "muted";
+    note.textContent = "Completion stays locked until an educator review is recorded for this original lesson.";
+    actions.append(save, complete, practice); root.append(actions, note);
+
+    const quiz = document.createElement("section");
+    quiz.className = "history-quiz"; quiz.hidden = true; quiz.setAttribute("aria-live", "polite");
+    root.append(quiz);
+    let questionIndex = 0, score = 0, answered = false;
+    const showQuestion = () => {
+      quiz.replaceChildren();
+      if (questionIndex >= lesson.questions.length) {
+        const h = document.createElement("h4"); h.textContent = `Practice complete · ${score} / ${lesson.questions.length}`;
+        const retry = document.createElement("button"); retry.type = "button"; retry.textContent = "Try again";
+        retry.addEventListener("click", () => { questionIndex = 0; score = 0; answered = false; showQuestion(); });
+        quiz.append(h, retry); return;
+      }
+      const q = lesson.questions[questionIndex];
+      const h = document.createElement("h4"); h.textContent = `Question ${questionIndex + 1} of ${lesson.questions.length}`;
+      const prompt = document.createElement("p"); prompt.textContent = q.prompt; quiz.append(h, prompt);
+      const feedback = document.createElement("p"); feedback.className = "quiz-feedback"; feedback.hidden = true;
+      q.choices.forEach((choice, index) => {
+        const button = document.createElement("button"); button.type = "button";
+        button.className = "history-choice"; button.textContent = `${String.fromCharCode(65 + index)}. ${choice}`;
+        button.addEventListener("click", () => {
+          if (answered) return;
+          answered = true;
+          const correct = index === q.answer; if (correct) score++;
+          feedback.hidden = false;
+          feedback.textContent = `${correct ? "Correct." : "Not quite."} ${q.explanation}`;
+          const next = document.createElement("button"); next.type = "button";
+          next.textContent = questionIndex === lesson.questions.length - 1 ? "See score" : "Next question";
+          next.addEventListener("click", () => { questionIndex++; answered = false; showQuestion(); });
+          quiz.append(feedback, next);
+          quiz.querySelectorAll(".history-choice").forEach(option => { option.disabled = true; });
+        });
+        quiz.append(button);
+      });
+    };
+    practice.addEventListener("click", () => { quiz.hidden = false; questionIndex = 0; score = 0; answered = false; showQuestion(); quiz.scrollIntoView({behavior: "smooth", block: "start"}); });
+    const nav = document.createElement("div"); nav.className = "history-lesson-actions";
+    const previous = document.createElement("button"); previous.type = "button"; previous.textContent = "Previous lesson"; previous.disabled = lessonIndex === 0;
+    previous.addEventListener("click", () => renderGrade10History(lessonIndex - 1));
+    const next = document.createElement("button"); next.type = "button"; next.textContent = "Next lesson"; next.disabled = lessonIndex >= lessons.length - 1;
+    next.addEventListener("click", () => renderGrade10History(lessonIndex + 1));
+    nav.append(previous, next); root.append(nav);
   }
   function showTopics(subject, topics) {
     const root = $("subjects"); root.replaceChildren();
