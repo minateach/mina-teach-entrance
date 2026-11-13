@@ -7,6 +7,7 @@ import { clerkClient, clerkMiddleware, getAuth } from "@clerk/express";
 import { publishableKeyFromHost } from "@clerk/shared/keys";
 import pg from "pg";
 import { createLearningCatalog, LearningInputError } from "./server/learning-catalog.mjs";
+import {materialProblem,materialsProblem} from "./server/lesson-materials.mjs";
 import { CLERK_PROXY_PATH, clerkProxyMiddleware, getClerkProxyHost } from "./server/middlewares/clerkProxyMiddleware.mjs";
 
 const projectRoot = resolve(fileURLToPath(new URL(".", import.meta.url)));
@@ -56,7 +57,7 @@ function setSecurityHeaders(response, legacyInlineHashes = null) {
     : "";
   response.setHeader(
     "Content-Security-Policy",
-    `default-src 'self'; connect-src 'self' https://*.clerk.accounts.dev https://clerk-telemetry.com https://cdn.protect.clerk.com https://*.client.protect.clerk.com; img-src 'self' data: https://*.clerk.accounts.dev https://img.clerk.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' https://*.clerk.accounts.dev https://cdn.protect.clerk.com${inlineScriptSources}${inlineHandlerSources}; worker-src 'self' blob:; frame-src https://*.clerk.accounts.dev; font-src 'self' https://fonts.gstatic.com data:; base-uri 'self'; form-action 'self'; frame-ancestors 'self'`,
+    `default-src 'self'; connect-src 'self' https://*.clerk.accounts.dev https://clerk-telemetry.com https://cdn.protect.clerk.com https://*.client.protect.clerk.com; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' https://*.clerk.accounts.dev https://cdn.protect.clerk.com${inlineScriptSources}${inlineHandlerSources}; worker-src 'self' blob:; frame-src https://*.clerk.accounts.dev; font-src 'self' https://fonts.gstatic.com data:; base-uri 'self'; form-action 'self'; frame-ancestors 'self'`,
   );
 }
 
@@ -85,7 +86,7 @@ async function readJsonBody(request, bodyLimit = maxBodyBytes) {
   for await (const chunk of request) {
     size += chunk.length;
     if (size > bodyLimit) {
-      const error = new Error("This message is too large. Shorten it and try again.");
+      const error = new Error("This upload exceeds the request budget. Submit lesson material as additional numbered sections; content is never shortened automatically.");
       error.statusCode = 413;
       throw error;
     }
@@ -530,7 +531,7 @@ function publicFilePath(pathname) {
   const allowedTopLevelFiles = new Set(["/Index.html", "/Index.HTml"]);
   if (allowedTopLevelFiles.has(pathname)) return pathname.slice(1);
   if (pathname.startsWith("/assistant/")) return pathname.slice(1);
-  if (new Set(["/learning/app.js", "/learning/styles.css", "/learning/library.css", "/learning/history-grade10.js", "/learning/dashboard.js", "/learning/learning-state.js", "/learning/lesson-view.js"]).has(pathname)) {
+  if (new Set(["/learning/app.js", "/learning/styles.css", "/learning/library.css", "/learning/history-grade10.js", "/learning/dashboard.js", "/learning/learning-state.js", "/learning/lesson-view.js", "/learning/material-reader.js", "/learning/coverage.html", "/learning/coverage.js"]).has(pathname)) {
     return pathname.slice(1);
   }
   return null;
@@ -838,6 +839,8 @@ function publicLesson(row) {
     id: String(row.id), grade: row.grade, stream: row.stream, subject: row.subject,
     chapter: row.chapter, title: row.title, language: row.language, content: row.content,
     examples: row.examples || [], keyPoints: row.key_points || [],
+    materials:row.materials,
+    materialEndpoint:`/api/learning/content/db-${row.id}/materials`,
     sourceLabel: row.source_label, sourceUrl: row.source_url || null,
   };
 }
@@ -849,10 +852,10 @@ function validLesson(input) {
       !String(input.sourceLabel || "").trim()) return false;
   if (![input.subject, input.chapter, input.title, input.content, input.sourceLabel].every(value => typeof value === "string")) return false;
   if (input.subject.length > 80 || input.chapter.length > 120 || input.title.length > 180 ||
-      input.content.length > 20000 || input.sourceLabel.length > 300) return false;
-  if (!Array.isArray(input.examples || []) || (input.examples || []).length > 20 ||
-      !Array.isArray(input.keyPoints || []) || (input.keyPoints || []).length > 30) return false;
-  if (![...(input.examples || []), ...(input.keyPoints || [])].every(value => typeof value === "string" && value.length <= 1000)) return false;
+      input.sourceLabel.length > 300) return false;
+  if (!Array.isArray(input.examples || []) || !Array.isArray(input.keyPoints || [])) return false;
+  if (![...(input.examples || []), ...(input.keyPoints || [])].every(value => typeof value === "string")) return false;
+  if(input.materials!==undefined && materialsProblem(input.materials))return false;
   if (input.sourceUrl) {
     try { if (!["http:", "https:"].includes(new URL(input.sourceUrl).protocol)) return false; }
     catch { return false; }
@@ -861,11 +864,11 @@ function validLesson(input) {
 }
 function lessonValues(input, userId) {
   return [Number(input.grade), input.stream, input.subject.trim(), input.chapter.trim(), input.title.trim(),
-    input.language, input.content.trim(), JSON.stringify(input.examples || []), JSON.stringify(input.keyPoints || []),
-    input.sourceLabel.trim(), input.sourceUrl || null, userId];
+    input.language, input.content, JSON.stringify(input.examples || []), JSON.stringify(input.keyPoints || []),
+    input.sourceLabel.trim(), input.sourceUrl || null, userId,input.materials===undefined?null:JSON.stringify(input.materials)];
 }
 
-for (const [path, handler] of [["catalog","catalog"],["course","course"]]) {
+for (const [path, handler] of [["catalog","catalog"],["course","course"],["audit","audit"]]) {
   app.get(`/api/learning/${path}`, async (request,response)=>{
     try { sendJson(response,200,await learningCatalog[handler](request.query)); }
     catch(error) { sendError(response,error instanceof LearningInputError?400:503,"LEARNING_LOAD_FAILED",error instanceof LearningInputError?error.message:"Learning content could not be loaded. Please retry."); }
@@ -877,6 +880,13 @@ app.get("/api/learning/content/:id",async(request,response)=>{
     if (!lesson) { sendError(response,404,"LESSON_NOT_FOUND","This lesson is unavailable or has not been published."); return; }
     sendJson(response,200,{lesson});
   } catch(error) { sendError(response,error instanceof LearningInputError?400:503,"LESSON_LOAD_FAILED",error instanceof LearningInputError?error.message:"The lesson could not be loaded. Please retry."); }
+});
+app.get("/api/learning/content/:id/materials",async(request,response)=>{
+  try {
+    const page=await learningCatalog.materials(request.params.id,request.query);
+    if(!page){sendError(response,404,"LESSON_NOT_FOUND","This lesson is unavailable or has not been published.");return;}
+    sendJson(response,200,page);
+  }catch(error){sendError(response,error instanceof LearningInputError?400:503,"MATERIAL_LOAD_FAILED",error instanceof LearningInputError?error.message:"Material could not be loaded. Retry; no sections have been removed.");}
 });
 app.get("/api/learning/lessons", async (request, response) => {
   try {
@@ -904,33 +914,58 @@ app.get("/api/learning/lessons", async (request, response) => {
     sendJson(response, 200, { lessons: result.rows.slice(0,limit).map(publicLesson),nextOffset:result.rows.length>limit?offset+limit:null });
   } catch (error) { sendError(response, error instanceof LearningInputError ?400:503, "LESSON_LOAD_FAILED",error instanceof LearningInputError ?error.message:"Lessons could not be loaded. Please retry."); }
 });
-app.get("/api/learning/lessons/manage", requireAuth, requireRole(...contentRoles), async (_request, response) => {
+app.get("/api/learning/lessons/manage", requireAuth, requireRole(...contentRoles), async (request, response) => {
   try {
-    const result = await pool.query("SELECT * FROM mina_learning_lessons ORDER BY created_at DESC LIMIT 300");
-    sendJson(response, 200, { lessons: result.rows.map(row => ({ ...publicLesson(row), reviewStatus: row.review_status })) });
+    const offset=Number(request.query.offset ?? 0);
+    if(!Number.isSafeInteger(offset) || offset<0){sendError(response,400,"INVALID_PAGE","Choose a valid lesson page.");return;}
+    const result = await pool.query("SELECT id,grade,stream,subject,chapter,title,language,source_label,source_url,review_status FROM mina_learning_lessons ORDER BY id LIMIT 21 OFFSET $1",[offset]);
+    sendJson(response, 200, { lessons: result.rows.slice(0,20).map(row => ({ ...publicLesson(row), reviewStatus: row.review_status })),nextOffset:result.rows.length>20?offset+20:null });
   } catch { sendError(response, 500, "LESSON_LOAD_FAILED", "Lesson drafts could not be loaded."); }
+});
+app.get("/api/learning/lessons/manage/:id",requireAuth,requireRole(...contentRoles),async(request,response)=>{
+  try {
+    if(!/^[1-9]\d{0,17}$/.test(request.params.id)){sendError(response,400,"INVALID_LESSON","Choose a valid lesson.");return;}
+    const result=await pool.query("SELECT * FROM mina_learning_lessons WHERE id=$1",[request.params.id]);
+    if(!result.rows.length){sendError(response,404,"LESSON_NOT_FOUND","Lesson not found.");return;}
+    sendJson(response,200,{lesson:{...publicLesson(result.rows[0]),reviewStatus:result.rows[0].review_status}});
+  }catch{sendError(response,503,"LESSON_LOAD_FAILED","The full lesson could not be loaded. Retry before editing.");}
 });
 app.post("/api/learning/lessons", requireAuth, requireRole(...contentRoles), async (request, response) => {
   try {
     if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
-    const input = await readJsonBody(request);
-    if (!validLesson(input)) { sendError(response, 400, "INVALID_LESSON", "Complete the lesson fields and include a source label."); return; }
-    const result = await pool.query("INSERT INTO mina_learning_lessons (grade,stream,subject,chapter,title,language,content,examples,key_points,source_label,source_url,created_by,updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10,$11,$12,$12) RETURNING id,review_status", lessonValues(input, request.userId));
+    const input = await readJsonBody(request,2_097_152);
+    if (!validLesson(input)) { sendError(response, 400, "INVALID_LESSON", input.materials!==undefined && materialsProblem(input.materials) || "Complete the lesson fields and include a source label."); return; }
+    const result = await pool.query("INSERT INTO mina_learning_lessons (grade,stream,subject,chapter,title,language,content,examples,key_points,source_label,source_url,created_by,updated_by,materials) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10,$11,$12,$12,COALESCE($13::jsonb,'[]'::jsonb)) RETURNING id,review_status", lessonValues(input, request.userId));
     sendJson(response, 201, { id: String(result.rows[0].id), reviewStatus: result.rows[0].review_status });
   } catch (error) {
-    sendError(response, error.code === "23505" ? 409 : 400, "LESSON_SAVE_FAILED", error.code === "23505" ? "A lesson with this grade, subject, chapter, title, and language already exists." : "The lesson could not be saved.");
+    sendError(response, error.statusCode || (error.code === "23505" ? 409 : 400), "LESSON_SAVE_FAILED", error.statusCode?error.message:error.code === "23505" ? "A lesson with this grade, subject, chapter, title, and language already exists." : "The lesson could not be saved.");
   }
 });
 app.put("/api/learning/lessons/:id", requireAuth, requireRole(...contentRoles), async (request, response) => {
   try {
     if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
-    const input = await readJsonBody(request);
-    if (!validLesson(input)) { sendError(response, 400, "INVALID_LESSON", "Complete the lesson fields and include a source label."); return; }
+    const input = await readJsonBody(request,2_097_152);
+    if (!validLesson(input)) { sendError(response, 400, "INVALID_LESSON", input.materials!==undefined && materialsProblem(input.materials) || "Complete the lesson fields and include a source label."); return; }
     const values = lessonValues(input, request.userId);
-    const result = await pool.query("UPDATE mina_learning_lessons SET grade=$1,stream=$2,subject=$3,chapter=$4,title=$5,language=$6,content=$7,examples=$8::jsonb,key_points=$9::jsonb,source_label=$10,source_url=$11,updated_by=$12,review_status='draft',reviewed_by=NULL,reviewed_at=NULL,updated_at=NOW() WHERE id=$13 RETURNING id", [...values.slice(0, 11), request.userId, request.params.id]);
+    const result = await pool.query("UPDATE mina_learning_lessons SET grade=$1,stream=$2,subject=$3,chapter=$4,title=$5,language=$6,content=$7,examples=$8::jsonb,key_points=$9::jsonb,source_label=$10,source_url=$11,updated_by=$12,materials=COALESCE($13::jsonb,materials),content_version=content_version+1,review_status='draft',reviewed_by=NULL,reviewed_at=NULL,updated_at=NOW() WHERE id=$14 RETURNING id", [...values,request.params.id]);
     if (!result.rowCount) { sendError(response, 404, "LESSON_NOT_FOUND", "Lesson not found."); return; }
     sendJson(response, 200, { updated: true, reviewStatus: "draft" });
-  } catch { sendError(response, 400, "LESSON_UPDATE_FAILED", "The lesson could not be updated."); }
+  } catch(error) { sendError(response, error.statusCode || 400, "LESSON_UPDATE_FAILED",error.statusCode?error.message:"The lesson could not be updated."); }
+});
+app.post("/api/learning/lessons/:id/materials",requireAuth,requireRole(...contentRoles),async(request,response)=>{
+  try {
+    if(!isSameOrigin(request)){sendError(response,403,"CROSS_ORIGIN_BLOCKED","This request is not allowed.");return;}
+    if(!/^[1-9]\d{0,17}$/.test(request.params.id)){sendError(response,400,"INVALID_LESSON","Choose a valid lesson.");return;}
+    const material=await readJsonBody(request,2_097_152);
+    const problem=materialProblem(material);
+    if(problem){sendError(response,400,"INVALID_MATERIAL",problem);return;}
+    const result=await pool.query(`UPDATE mina_learning_lessons SET materials=materials || $2::jsonb,content_version=content_version+1,
+      review_status='draft',reviewed_by=NULL,reviewed_at=NULL,updated_by=$3,updated_at=NOW()
+      WHERE id=$1 AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(materials) AS section WHERE section->>'id'=$4) RETURNING id`,
+      [request.params.id,JSON.stringify([material]),request.userId,material.id]);
+    if(!result.rowCount){sendError(response,409,"MATERIAL_NOT_APPENDED","The lesson is missing or that material ID already exists. Existing content was not replaced.");return;}
+    sendJson(response,201,{saved:true,reviewStatus:"draft"});
+  }catch(error){sendError(response,error.statusCode || 503,"MATERIAL_SAVE_FAILED",error.statusCode?error.message:"The material could not be saved. No section was shortened.");}
 });
 app.post("/api/learning/lessons/:id/review", requireAuth, requireRole(...reviewRoles), async (request, response) => {
   try {

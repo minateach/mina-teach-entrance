@@ -85,14 +85,23 @@
             <label>Lesson title<input name="title" required maxlength="180"></label>
             <label>Language<select name="language"><option value="en">English</option><option value="om">Afaan Oromoo</option><option value="am">Amharic</option></select></label>
           </div>
-          <label>Lesson content<textarea name="content" rows="6" maxlength="20000" required></textarea></label>
+          <label>Complete lesson notes<textarea name="content" rows="8" required></textarea></label>
           <label>Examples, one per line<textarea name="examples" rows="3"></textarea></label>
           <label>Important notes, one per line<textarea name="keyPoints" rows="3"></textarea></label>
+          <label>Additional topic materials as a JSON array<textarea name="materialsJson" rows="7" spellcheck="false">[]</textarea></label>
+          <p>Supported material types: notes, subtopic, definition, concept, example, formula, diagram, table, activity, exercise, review, MCQ, resource, and timeline. Every section needs a stable id, topicId, type, and title. MCQs need four choices, correctIndex, and an explanation; exercises need answers. No content is shortened automatically.</p>
           <div class="form-grid"><label>Source label<input name="sourceLabel" required maxlength="300"></label><label>Source URL<input name="sourceUrl" type="url" maxlength="500"></label></div>
           <div class="actions"><button type="submit">Save lesson draft</button><button type="button" class="secondary" id="cancel-lesson-edit" hidden>Cancel edit</button></div>
           <p id="lesson-form-status" role="status"></p>
         </form>
+        <details class="import">
+          <summary>Append a material section to the lesson being edited</summary>
+          <p>For very long lessons, add sections separately instead of shortening the notes. Each request supports up to 2 MiB; the lesson has no fixed section-count limit. Edit an existing lesson above first. New sections return it to draft for review.</p>
+          <form id="material-form"><label>One complete material object<textarea name="material" rows="8" required spellcheck="false"></textarea></label><button type="submit">Append section as draft</button></form>
+          <p id="material-form-status" role="status"></p>
+        </details>
         <div id="lesson-admin-list" class="question-list"></div>
+        <button type="button" id="load-more-lessons" class="secondary" hidden>Load more lessons</button>
         <p id="lesson-admin-status" role="status"></p>
       </section>
       <section id="roles-panel" class="panel roles-panel" hidden>

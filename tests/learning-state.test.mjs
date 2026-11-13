@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 const source=readFileSync(new URL("../learning/learning-state.js",import.meta.url),"utf8");
-const {normalizeState,mergeLearning,createStore,STORAGE_KEY}=await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
+const {normalizeState,mergeLearning,createStore,STORAGE_KEY,topicIsComplete}=await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
 function storage() {
   const entries=new Map();
   return {getItem:key=>entries.get(key)||null,setItem:(key,value)=>entries.set(key,value),entries};
@@ -69,4 +69,18 @@ test("cloud failures leave a visible error and pending local copy",async()=>{
   store.state.completed.push("real");store.save();await store.retry();
   assert.match(statuses.at(-1),/Session expired.*Retry sync/);
   assert.equal(JSON.parse(localStorage.getItem(`${STORAGE_KEY}:account:user_A`))._pendingSync,true);
+});
+test("topic progress is normalized, merged, and restored without marking a whole lesson complete",async()=>{
+  const merged=mergeLearning({completedTopics:["lesson:1:topic:0"]},{completedTopics:["lesson:1:topic:1","lesson:1:topic:1",null]});
+  assert.deepEqual(merged.completedTopics,["lesson:1:topic:0","lesson:1:topic:1"]);
+  assert.equal(topicIsComplete(merged,"lesson:1:topic:0"),true);
+  assert.equal(topicIsComplete(merged,"lesson:1:topic:2"),false);
+  assert.deepEqual(merged.completed,[]);
+  merged.completed.push("lesson:1");
+  assert.equal(topicIsComplete(merged,"lesson:1:topic:2"),true);
+  globalThis.localStorage=storage();globalThis.fetch=async()=>response({signedIn:false});
+  const store=createStore();await store.initialize();
+  store.state.completedTopics.push("lesson:2:topic:0");store.save();
+  const restored=createStore();await restored.initialize();
+  assert.equal(topicIsComplete(restored.state,"lesson:2:topic:0"),true);
 });

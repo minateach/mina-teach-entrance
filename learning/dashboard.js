@@ -1,5 +1,5 @@
-import {api,createStore} from "./learning-state.js";
-import {node,lessonUrl,courseUrl,renderLesson} from "./lesson-view.js";
+import {api,createStore,topicIsComplete} from "./learning-state.js";
+import {node,lessonUrl,courseUrl,practiceUrl,topicParams,renderLesson} from "./lesson-view.js";
 
 const $=id=>document.getElementById(id);
 const store=createStore(message=>{$("sync-status").textContent=message;});
@@ -27,12 +27,17 @@ function updateProgress() {
   $("coverage-status").textContent=catalog
     ? `${completed} completed · ${Math.max(0,keys.size-completed)} remaining of ${keys.size} available lessons in Grade ${scope.grade} (${({en:"English",om:"Afaan Oromoo",am:"Amharic"})[scope.language]}). Counts reflect available content, not full textbook coverage.`
     : "Availability could not be confirmed. Progress totals are not available.";
+  const topicKeys=(catalog?.subjects || []).flatMap(subject=>subject.availableTopicKeys || []);
+  const studied=topicKeys.filter(key=>topicIsComplete(store.state,key)).length;
+  $("topic-coverage-status").textContent=catalog
+    ? `${studied} of ${topicKeys.length} available topics studied · ${topicKeys.length-studied} topics remaining.`
+    : "Topic availability could not be confirmed.";
 }
 function changed() {updateProgress();renderSaved();renderResults();}
 function renderResults() {
   const box=$("quiz-progress");box.replaceChildren();
   const local=store.state.practice.filter(attempt=>attempt.grade===scope?.grade).slice(0,8);
-  local.forEach(attempt=>box.append(node("p",`AI-authored practice · Grade ${attempt.grade} ${attempt.subject} · Lesson ${attempt.lesson} · ${attempt.score}/${attempt.total}`)));
+  local.forEach(attempt=>box.append(node("p",`${attempt.kind==="published_lesson"?"Published lesson practice":"AI-authored practice"} · Grade ${attempt.grade} ${attempt.subject} · Lesson ${attempt.lesson} · ${attempt.score}/${attempt.total}`)));
   examHistory.filter(attempt=>Number(attempt.grade)===scope?.grade).slice(0,8).forEach(attempt=>box.append(node("p",`Reviewed-bank ${attempt.mode || "practice"} · ${attempt.subject || "All subjects"} · ${attempt.score}/${attempt.total}`)));
   if(!box.children.length)box.append(node("p","No practice results for this grade yet."));
   if(examError)box.append(node("p",examError,"notice"));
@@ -44,7 +49,7 @@ async function openSaved(item,message) {
       item.key.startsWith("curriculum:history:10:")?`history10-${item.key.slice("curriculum:history:10:".length)}`:null);
     if(!id)throw new Error("This legacy saved entry has no actual lesson ID. It was preserved, but cannot be opened as a lesson.");
     const {lesson}=await api(`/api/learning/content/${encodeURIComponent(id)}`);
-    location.href=lessonUrl(lesson,Number.isInteger(item.topicIndex)?{topic:String(item.topicIndex)}:{});
+    location.href=lessonUrl(lesson,topicParams(item.topicIndex));
   } catch(error) {message.textContent=error.message;}
 }
 function renderSaved() {
@@ -78,6 +83,18 @@ function breadcrumbs() {
   root.append(link("← Back to dashboard",dashboardUrl()));
   if(scope.subject)root.append(node("p",`Grade ${scope.grade} · ${scope.subject}`,"eyebrow"));
 }
+function appendPracticeLinks(container,subject) {
+  const target={...scope,subject:subject.name,practiceStream:subject.practiceStream};
+  if(subject.practiceLessonId) {
+    container.append(link("Start lesson practice",lessonUrl({...target,id:subject.practiceLessonId},{practice:"1"}),"subject-practice"));
+    container.append(node("small",`${subject.practiceQuestionCount} lesson-practice questions across available lessons. Source and review status are shown on each lesson.`,"muted"));
+  }
+  if(subject.reviewedQuestionCount>0) {
+    container.append(link(`Reviewed exam practice (${subject.reviewedQuestionCount} questions)`,practiceUrl(target),"subject-practice"));
+  } else if(!subject.practiceLessonId) {
+    container.append(link("Check exam availability",practiceUrl(target),"subject-practice"));
+  }
+}
 function renderDashboard() {
   root.className="subject-grid";
   root.replaceChildren();
@@ -90,9 +107,14 @@ function renderDashboard() {
     a.append(node("h3",subject.name),node("small",subject.lessonCount
       ? `${subject.chapterCount} chapter${subject.chapterCount===1?"":"s"} · ${completed}/${subject.lessonCount} completed · ${subject.lessonCount-completed} remaining`
       : "Learning content is not available yet"),node("span","Open subject →"));
+    if(subject.lessonCount) {
+      const topicKeys=subject.availableTopicKeys || [];
+      const studied=topicKeys.filter(key=>topicIsComplete(store.state,key)).length;
+      a.append(node("small",`${studied}/${topicKeys.length} topics studied · ${topicKeys.length-studied} remaining`));
+    }
     wrapper.append(a);
     if(subject.startLessonId)wrapper.append(link("Start learning",lessonUrl({...target,id:subject.startLessonId}),"subject-open"));
-    wrapper.append(link("Practice",`/exams/?${new URLSearchParams({grade:String(scope.grade),stream:$("stream").value,subject:subject.name})}`,"subject-practice"));
+    appendPracticeLinks(wrapper,subject);
     root.append(wrapper);
   });
 }
@@ -100,12 +122,24 @@ function renderCourse(chapterId) {
   root.replaceChildren();breadcrumbs();
   root.append(node("h2",`${scope.subject} · Chapters and lessons`));
   root.append(node("p","Only chapters with actual learning content are listed. Drafts and unavailable textbook chapters are not presented as lessons.","muted"));
+  const summary=catalog.subjects.find(subject=>subject.name===scope.subject);
+  if(summary)appendPracticeLinks(root,summary);
+  if(chapterId&&!course.chapters.some(chapter=>chapter.id===chapterId))throw new Error("This chapter does not belong to the selected grade and subject.");
   if(!course.chapters.length) {
     root.append(node("div",`No learning content is published for Grade ${scope.grade} ${scope.subject} in ${({en:"English",om:"Afaan Oromoo",am:"Amharic"})[scope.language]} yet. This is a missing-content notice, not a lesson. Other grades and subjects remain accessible.`,"notice"));
     return;
   }
-  if(chapterId&&!course.chapters.some(chapter=>chapter.id===chapterId))throw new Error("This chapter does not belong to the selected grade and subject.");
   if(chapterId)root.append(link("All chapters",courseUrl(scope)));
+  if(chapterId) {
+    const index=course.chapters.findIndex(chapter=>chapter.id===chapterId);
+    const nav=node("nav",undefined,"history-lesson-actions");nav.setAttribute("aria-label","Chapter navigation");
+    for(const [offset,label] of [[-1,"Previous chapter"],[1,"Next chapter"]]) {
+      const target=course.chapters[index+offset];
+      if(target)nav.append(link(label,courseUrl(scope,{chapter:target.id})));
+      else {const unavailable=button(label,()=>{});unavailable.disabled=true;nav.append(unavailable);}
+    }
+    root.append(nav);
+  }
   for(const chapter of course.chapters.filter(chapter=>!chapterId || chapter.id===chapterId)) {
     const panel=node("details",undefined,"history-unit-card");panel.open=!!chapterId || course.chapters.length===1;
     const title=chapter.title.match(/^\d+[.\s]/)?chapter.title:`${chapter.number}. ${chapter.title}`;
@@ -115,6 +149,15 @@ function renderCourse(chapterId) {
     chapter.lessons.forEach(lesson=>{
       const a=link(`${lesson.number} · ${lesson.title}${store.state.completed.includes(lesson.key)?" · Completed ✓":""}`,lessonUrl(lesson),"history-lesson-link");
       panel.append(a);
+      if(lesson.topicOutline?.length) {
+        const topics=node("details",undefined,"lesson-topics");
+        topics.append(node("summary",`${lesson.topicOutline.length} learning topics`));
+        lesson.topicOutline.forEach(topic=>{
+          const topicLink=link(topic.title,lessonUrl(lesson,{topic:topic.id}),"topic-link");
+          topicLink.dataset.topicId=topic.id;topics.append(topicLink);
+        });
+        panel.append(topics);
+      }
     });
     panel.append(link("Start learning",lessonUrl(chapter.lessons[0]),"subject-open"));
     root.append(panel);
@@ -148,7 +191,7 @@ async function loadPage(force=false) {
     document.querySelector(".content-grid").classList.toggle("history-mode",inCourse);
     document.querySelector(".planner").hidden=inCourse;
     document.querySelector(".lesson-library").hidden=inCourse;
-    if(!inCourse && (params.has("lesson")||params.has("chapter")))throw new Error("Select a subject before opening a lesson or chapter.");
+    if(!inCourse && (params.has("lesson")||params.has("chapter")||params.has("topic")))throw new Error("Select a subject before opening a lesson, chapter, or topic.");
     store.state.settings={grade:String(scope.grade),language,stream:$("stream").value};
     if(!inCourse)renderDashboard();
     else {
@@ -156,10 +199,12 @@ async function loadPage(force=false) {
       if(version!==renderVersion)return;
       course=data;
       const requested=params.get("lesson");
+      if(params.has("topic")&&!requested)throw new Error("Select a lesson before opening one of its topics.");
       if(requested) {
         const flat=course.chapters.flatMap(chapter=>chapter.lessons);
         const meta=flat.find(lesson=>lesson.id===requested || lesson.id===`db-${requested}` || lesson.origin==="ai_authored"&&lesson.number===requested);
         if(!meta)throw new Error("This lesson does not belong to the selected grade, subject, or language, or is not published.");
+        if(params.has("chapter") && params.get("chapter")!==meta.chapterId)throw new Error("This lesson does not belong to the requested chapter.");
         const {lesson}=await api(`/api/learning/content/${encodeURIComponent(meta.id)}`);
         if(version!==renderVersion)return;
         if(lesson.grade!==scope.grade || lesson.subject!==scope.subject || lesson.language!==scope.language)throw new Error("The requested lesson does not match this course.");
@@ -167,8 +212,10 @@ async function loadPage(force=false) {
         root.append(link("← All chapters",courseUrl(scope)),link("Open chapter",courseUrl(scope,{chapter:meta.chapterId})));
         const body=node("article",undefined,"lesson-page");body.id="lesson-page";root.append(body);
         renderLesson({root:body,lesson:{...meta,...lesson},course,store,changed});
+        const startPractice=params.get("practice")==="1" && (lesson.questions?.length || lesson.materialOutline?.some(material=>material.type==="mcq"));
+        if(startPractice)body.querySelector("#start-practice").click();
         const topic=params.get("topic");
-        if(topic!==null && /^\d+$/.test(topic))requestAnimationFrame(()=>document.getElementById(`topic-${topic}`)?.scrollIntoView());
+        if(!startPractice && topic!==null && /^[A-Za-z0-9_-]{1,80}$/.test(topic))requestAnimationFrame(()=>document.getElementById(`topic-${topic}`)?.scrollIntoView());
       } else renderCourse(params.get("chapter"));
     }
     updateProgress();renderSaved();renderTasks();renderResults();
@@ -202,7 +249,7 @@ $("task-form").addEventListener("submit",event=>{
 for(const id of ["grade","stream","language"])$(id).addEventListener("change",()=>{
   const params=new URLSearchParams(location.search);
   params.set("grade",$("grade").value);params.set("stream",$("stream").value);params.set("language",$("language").value);
-  for(const key of ["lesson","chapter","topic"])params.delete(key);
+  for(const key of ["lesson","chapter","topic","material","practice"])params.delete(key);
   store.state.settings={grade:$("grade").value,stream:$("stream").value,language:$("language").value};store.save();
   history.pushState({},"",`/learning/?${params}`);loadPage();
 });

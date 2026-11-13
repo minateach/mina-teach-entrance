@@ -6,4 +6,5 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 # Use the committed lockfile and never prompt or enable a hosted service.
 npm ci --no-audit --no-fund --prefer-offline
+node scripts/migrate-learning-materials.mjs
 npm run build:account

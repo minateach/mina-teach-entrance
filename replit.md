@@ -56,3 +56,25 @@ existing work.
   questions. Teachers can author drafts; reviewers can manage and approve
   sourced questions. Student exams may only use approved, source-labeled
   curriculum questions; AI-generated practice stays separate from that bank.
+
+## Education system checks
+
+- `npm test`: builds the account page, checks JavaScript syntax, and runs unit and
+  database tests. Database material fixtures are rolled back.
+- `npm run test:navigation:desktop`: individually clicks the home subject links,
+  every catalog subject for Grades 9–12, available chapters/topics, practice
+  routes, and navigation controls in desktop Chrome.
+- `npm run test:navigation:android`: runs the same matrix with an Android user
+  agent, phone viewport, and touchscreen input. This is Android emulation, not a
+  physical-device test.
+- `npm run test:learning-browser`: checks existing lesson scoring/retry, saves,
+  bookmarks, progress, planner, error recovery, and related public pages.
+- `npm run test:materials-browser`: checks long-form and structured material
+  rendering, pagination, retry and completion gates, including browser-only
+  technical fixtures that are not published to students.
+- `npm run audit:materials`: compares available stored/bundled material with the
+  API and reports missing curriculum coverage separately.
+
+Browser checks require the running workflow and `REPLIT_DEV_DOMAIN`. They do not
+bypass authentication. Successful guest navigation does not verify signed-in exam
+creation, account synchronization, or educator publishing.

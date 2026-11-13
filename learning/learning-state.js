@@ -11,6 +11,7 @@ export function normalizeState(value={}) {
   if(!value || typeof value!=="object" || Array.isArray(value))value={};
   return {...value,settings:{grade:"9",stream:"natural",language:"en",...value.settings},
     completed:[...new Set(list(value.completed).filter(item=>typeof item==="string"))],
+    completedTopics:[...new Set(list(value.completedTopics).filter(item=>typeof item==="string"))],
     saved:list(value.saved).filter(item=>item && typeof item.key==="string"),
     bookmarks:list(value.bookmarks).filter(item=>item && typeof item.key==="string"),
     tasks:list(value.tasks).filter(item=>item && typeof item.text==="string"),
@@ -27,11 +28,17 @@ export function mergeLearning(remote,local) {
     .filter(item=>!removedTasks.includes(item.id || `legacy:${item.text}`));
   return normalizeState({...a,...b,settings:{...a.settings,...b.settings},
     completed:[...new Set([...a.completed,...b.completed])],
+    completedTopics:[...new Set([...a.completedTopics,...b.completedTopics])],
     saved:merge(a.saved,b.saved,"key").filter(item=>!removedSaved.includes(item.key)),
     bookmarks:merge(a.bookmarks,b.bookmarks,"key").filter(item=>!removedBookmarks.includes(item.key)),
     tasks,
     practice:merge(a.practice,b.practice,"id").sort((x,y)=>String(y.completedAt).localeCompare(String(x.completedAt))).slice(0,50),
     removedSaved,removedBookmarks,removedTasks});
+}
+export function topicIsComplete(state, key) {
+  const split = key.lastIndexOf(":topic:");
+  return list(state.completedTopics).includes(key) ||
+    split >= 0 && list(state.completed).includes(key.slice(0,split));
 }
 export function createStore(statusChanged=()=>{}) {
   let key=STORAGE_KEY, state=normalizeState(), signedIn=false, readyForSync=false,identity=null;

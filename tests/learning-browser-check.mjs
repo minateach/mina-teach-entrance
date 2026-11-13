@@ -15,6 +15,10 @@ async function navigate(path,condition='document.getElementById("coverage-status
 const course="/learning/?grade=10&subject=History&language=en";
 try {
   await command("Emulation.setDeviceMetricsOverride",{width:390,height:844,deviceScaleFactor:1,mobile:true});
+  await navigate("/",'document.querySelectorAll("a.card").length >= 10');
+  assert.equal(await evaluate('document.querySelector(".hero .btn").getAttribute("href")'),"/learning/");
+  await evaluate('document.querySelector(".hero .btn").click()');
+  await waitFor('location.pathname==="/learning/" && document.querySelectorAll(".course-card").length===18');
   await navigate("/learning/?grade=10&language=en");
   await evaluate('localStorage.setItem("minaTeach.learning.v1",JSON.stringify({completed:["9:natural:Mathematics:0","nonexistent"],tasks:[{text:"Preserve my planner task",done:false}]}))');
   await navigate("/learning/?grade=10&language=en");
@@ -29,6 +33,12 @@ try {
   assert.equal(await evaluate('document.querySelectorAll(".course-card").length'),18);
   assert.equal(browser.requests.some(url=>url.endsWith("/learning/history-grade10.js")),false,"no entire bundled curriculum script downloaded");
   assert.equal(browser.requests.some(url=>url.includes("/api/learning/content/")),false,"dashboard loads summaries only");
+  const inlinePractice=await evaluate('[...document.querySelectorAll(".course-card")].find(card=>card.querySelector(".subject-card").getAttribute("aria-label").includes("History")).querySelector(".subject-practice").getAttribute("href")');
+  assert.match(inlinePractice,/practice=1/);
+  assert.doesNotMatch(inlinePractice,/\/exams\//);
+  await navigate(inlinePractice,'document.getElementById("lesson-practice")?.hidden===false');
+  assert.match(await evaluate('document.getElementById("lesson-practice").textContent'),/Question 1 of 10/);
+  await navigate("/learning/?grade=10&language=en");
   await evaluate('document.getElementById("grade").value="11";document.getElementById("grade").dispatchEvent(new Event("change"))');
   await waitFor('document.getElementById("coverage-status").textContent.includes("Grade 11")');
   await evaluate('[...document.querySelectorAll(".subject-card")].find(a=>a.getAttribute("aria-label").includes("Mathematics")).click()');
@@ -58,10 +68,17 @@ try {
   await waitFor('document.getElementById("lesson-page")?.innerText.includes("Features of Capitalism")');
   const firstLessonUrl=await evaluate("location.pathname+location.search");
   assert.equal(await evaluate('document.getElementById("complete-lesson").disabled'),false);
+  assert.match(await evaluate('document.getElementById("lesson-topic-progress").textContent'),/0 of 4/);
+  await evaluate('document.querySelector("[data-topic-action=complete]").click()');
+  assert.match(await evaluate('document.getElementById("lesson-topic-progress").textContent'),/1 of 4/);
+  assert.equal(await evaluate('document.getElementById("completed-count").textContent'),"0","studying one topic does not complete the whole lesson");
+  await navigate(firstLessonUrl,'document.getElementById("lesson-page")');
+  assert.match(await evaluate('document.getElementById("lesson-topic-progress").textContent'),/1 of 4/);
   await evaluate('document.querySelector(".lesson-page .history-lesson-actions button").click()');
   await evaluate('document.getElementById("complete-lesson").click()');
   await evaluate('[...document.querySelectorAll(".history-lesson-section button")].find(button=>button.textContent==="Bookmark topic").click()');
   assert.equal(await evaluate('document.getElementById("completed-count").textContent'),"1","legacy fake completions excluded");
+  assert.match(await evaluate('document.getElementById("lesson-topic-progress").textContent'),/4 of 4/);
   await navigate(firstLessonUrl,'document.getElementById("lesson-page")');
   assert.equal(await evaluate('document.getElementById("complete-lesson").textContent'),"Completed ✓");
   assert.equal(await evaluate('document.querySelector(".lesson-page .history-lesson-actions button").textContent'),"★ Saved lesson");
@@ -103,6 +120,7 @@ try {
   await navigate("/learning/?grade=10&language=en");
   assert.equal(await evaluate('document.getElementById("completed-count").textContent'),"1");
   assert.equal(await evaluate('document.getElementById("remaining-count").textContent'),"5");
+  assert.match(await evaluate('document.getElementById("topic-coverage-status").textContent'),/4 of 19 available topics studied/);
   assert.match(await evaluate('document.getElementById("quiz-progress").textContent'),/AI-authored practice/);
   await evaluate('document.querySelector("#saved-lessons button").click()');
   await waitFor('document.getElementById("lesson-page")?.innerText.includes("Features of Capitalism")');
@@ -115,6 +133,15 @@ try {
   await navigate("/learning/?grade=10&language=en");
   assert.match(await evaluate('document.getElementById("saved-lessons").textContent'),/No saved lessons/);
   assert.match(await evaluate('document.getElementById("bookmarked-topics").textContent'),/No bookmarked topics/);
+  await navigate("/learning/?grade=9&language=en");
+  const english=(await json("/api/learning/catalog?grade=9")).data.subjects.find(subject=>subject.name==="English");
+  assert.ok(english.reviewedQuestionCount>=10);
+  const reviewedHref=await evaluate('[...document.querySelectorAll(".course-card")].find(card=>card.querySelector(".subject-card").getAttribute("aria-label").includes("English")).querySelector(".subject-practice").getAttribute("href")');
+  await navigate(reviewedHref,`document.getElementById("bank-status")?.textContent.includes("${english.reviewedQuestionCount} reviewed questions available")`);
+  assert.equal(await evaluate('document.getElementById("subject").value'),"English");
+  assert.equal(await evaluate('document.getElementById("start-exam").disabled'),false);
+  await evaluate('document.getElementById("start-exam").click()');
+  await waitFor('document.getElementById("bank-status").textContent.includes("Sign in before starting an exam")');
 
   for(const path of ["/learning/?grade=13","/learning/?grade=10&subject=Unknown","/learning/?grade=10&subject=History&lesson=db-99999","/learning/?grade=9&subject=History&lesson=history10-1.1","/learning/?grade=10&subject=History&chapter=wrong","/learning/?grade=10&language=zz"]) {
     await navigate(path,'document.querySelector("#subjects h2")?.textContent==="Learning content could not be opened"');
@@ -163,5 +190,6 @@ try {
   await waitFor('location.pathname.startsWith("/account/") && (document.body.textContent.includes("Welcome back") || document.body.textContent.includes("sign-in setup"))');
   assert.deepEqual(browser.exceptions,[],"no uncaught browser errors");
   console.log("PASS: all 36 grade/subject routes and APIs; six real lesson journeys; all 60 MCQs, retry/scoring; chapters and previous/next; save/bookmark add/remove/reopen; reload progress and planner; summary-only loading; invalid routes; server-error recovery; desktop/mobile; protected endpoints; exam/assistant/account page smoke checks.");
+  console.log("PASS: homepage Start Learning and subject links; History practice opens actual inline questions; Grade 9 English practice resolves to the available reviewed bank and requires login; topic completion persists and whole-lesson completion updates topic totals.");
   console.log("NOT VERIFIED: real signed-in account synchronization, authorized publishing, or cross-account isolation in a signed-in browser. State/sync failure logic is covered separately using mocked HTTP responses.");
 } finally {await browser.close();}

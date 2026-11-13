@@ -27,6 +27,8 @@ test("summary requests omit prose/questions; detail requests load one actual les
   assert.equal(lesson.questions.length,10);
   assert.ok(lesson.content.length>80);
   assert.equal(lesson.origin,"ai_authored");
+  assert.deepEqual(course.chapters[0].lessons[0].topicOutline,lesson.topics.map((topic,index)=>({id:String(index),title:topic.title})));
+  assert.equal(course.chapters.flatMap(chapter=>chapter.lessons).reduce((count,lesson)=>count+lesson.topicOutline.length,0),19);
   assert.equal((await api.course({grade:10,subject:"History",language:"am"})).lessonCount,0);
 });
 test("database chapter and lesson numbers sort naturally; drafts/incomplete rows are guarded in SQL",async()=>{
@@ -61,4 +63,30 @@ test("database failures propagate rather than returning invented empty curricula
   const api=createLearningCatalog({query:async()=>{throw new Error("simulated database outage");}});
   await assert.rejects(api.catalog({grade:9}),/outage/);
   await assert.rejects(api.course({grade:10,subject:"History"}),/outage/);
+});
+test("practice summaries distinguish generated lesson questions from eligible reviewed bank counts",async()=>{
+  const pool={query:async(sql,params)=>{
+    assert.deepEqual(params,[10]);
+    if(sql.includes("mina_questions")) {
+      assert.match(sql,/review_status='approved'/);
+      assert.match(sql,/source_kind<>'ai_generated'/);
+      return {rows:[{subject:"English",stream:"common",count:60},{subject:"History",stream:"social",count:12},{subject:"Afaan Oromoo",stream:"social",count:5}]};
+    }
+    return {rows:[]};
+  }};
+  // Summary metadata uses grade and language; the grouped exam count uses grade only.
+  const api=createLearningCatalog({query:async(sql,params)=>sql.includes("mina_questions")?pool.query(sql,params):({rows:[]})});
+  const catalog=await api.catalog({grade:10});
+  const history=catalog.subjects.find(subject=>subject.name==="History");
+  assert.equal(history.practiceLessonId,"history10-1.1");
+  assert.equal(history.practiceQuestionCount,60);
+  assert.equal(history.reviewedQuestionCount,12);
+  assert.equal(history.practiceStream,"social");
+  assert.equal(history.availableTopicKeys.length,19);
+  assert.equal(new Set(history.availableTopicKeys).size,19);
+  const english=catalog.subjects.find(subject=>subject.name==="English");
+  assert.equal(english.reviewedQuestionCount,60);
+  assert.equal(english.lessonCount,0,"questions do not manufacture published lessons");
+  assert.equal(english.practiceLessonId,null);
+  assert.equal(catalog.subjects.find(subject=>subject.name==="Afaan Oromoo").practiceStream,"social");
 });

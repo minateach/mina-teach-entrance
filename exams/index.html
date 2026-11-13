@@ -16,9 +16,11 @@
 <body>
   <header><a href="/" class="brand"><img src="/images/0_1000107983_1794514022860.png" srcset="/images/mina-teach-ai-logo-256.png 256w, /images/mina-teach-ai-logo-512.png 512w, /images/mina-teach-ai-logo-1024.png 1024w" sizes="64px" alt="Dambi Dollo University and Mina Teach AI logo" style="width:clamp(48px,6vw,64px);height:auto;max-height:42px;object-fit:contain;flex:none"><span><b>MINA TEACH AI</b><small>Dhaloota beekumsa omishuudha.</small></span></a><nav><a href="/admin/">Admin Dashboard</a><a href="/learning/">Learning</a><a href="/account/">Account</a><a href="/assistant/">AI Assistant</a></nav></header>
   <main>
+    <p><a id="return-to-learning" href="/learning/">Back to learning</a></p>
     <section class="intro"><p class="eyebrow">ENTRANCE EXAM PRACTICE</p><h1>Practice with reviewed questions.</h1><p>Practice questions are not official past examination papers. Exams use only educator-approved questions with recorded sources.</p></section>
     <section class="layout">
       <section class="panel" id="setup">
+        <aside id="resume-notice" hidden><p id="resume-message" role="status"></p><button id="resume-saved" type="button">Resume previous session</button></aside>
         <h2>Choose a practice set</h2>
         <div class="filters"><label>Mode<select id="mode"><option value="practice">Practice with feedback</option><option value="entrance">Entrance mock exam</option></select></label><label id="question-count-wrap">Practice questions<select id="question-count"><option value="10">10 questions</option><option value="20">20 questions</option><option value="30">30 questions</option><option value="60">60 questions</option></select></label></div>
         <div class="filters" id="subject-filters">

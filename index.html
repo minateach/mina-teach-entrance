@@ -100,6 +100,9 @@ header h1 {
   margin-bottom: 10px;
   color: #1d4ed8;
 }
+a.card { display:block; color:inherit; text-decoration:none; }
+a.card:hover, a.card:focus-visible { outline:2px solid #2563eb; outline-offset:3px; }
+a.card span { display:block; margin-top:14px; color:#1d4ed8; font-weight:bold; }
 
 .card .assistant-link {
   display: inline-block;
@@ -152,7 +155,7 @@ footer {
     with confidence. Build your knowledge,
     improve your skills and achieve your goals.
   </p>
-  <a href="#courses" class="btn">Start Learning 🚀</a>
+  <a href="/learning/" class="btn">Start Learning 🚀</a>
 </section>
 
 <section class="section" id="courses">
@@ -160,20 +163,31 @@ footer {
 
   <div class="cards">
 
-    <div class="card">
+    <a class="card" href="/learning/?grade=9&amp;subject=English">
       <h3>📘 English</h3>
       <p>Grammar, Vocabulary and Reading.</p>
-    </div>
+      <span>Open English →</span>
+    </a>
 
-    <div class="card">
+    <a class="card" href="/learning/?grade=9&amp;subject=Aptitude">
       <h3>🧠 Aptitude</h3>
       <p>Logical thinking and problem solving.</p>
-    </div>
+      <span>Open Aptitude →</span>
+    </a>
 
-    <div class="card">
+    <a class="card" href="/learning/?grade=9&amp;subject=Mathematics">
       <h3>🔢 Mathematics</h3>
       <p>Mathematical concepts and practice.</p>
-    </div>
+      <span>Open Mathematics →</span>
+    </a>
+
+    <a class="card" href="/learning/?grade=9&amp;subject=Physics"><h3>Physics</h3><p>Explore available learning material and practice.</p><span>Open Physics →</span></a>
+    <a class="card" href="/learning/?grade=9&amp;subject=Chemistry"><h3>Chemistry</h3><p>Explore available learning material and practice.</p><span>Open Chemistry →</span></a>
+    <a class="card" href="/learning/?grade=9&amp;subject=Biology"><h3>Biology</h3><p>Explore available learning material and practice.</p><span>Open Biology →</span></a>
+    <a class="card" href="/learning/?grade=9&amp;subject=Geography"><h3>Geography</h3><p>Explore available learning material and practice.</p><span>Open Geography →</span></a>
+    <a class="card" href="/learning/?grade=9&amp;subject=History"><h3>History</h3><p>Explore available learning material and practice.</p><span>Open History →</span></a>
+    <a class="card" href="/learning/?grade=9&amp;subject=Economics"><h3>Economics</h3><p>Explore available learning material and practice.</p><span>Open Economics →</span></a>
+    <a class="card" href="/learning/?grade=9&amp;subject=Civics"><h3>Civics</h3><p>Explore available learning material and practice.</p><span>Open Civics →</span></a>
 
     <div class="card">
       <h3>📝 Practice Exams</h3>
@@ -184,7 +198,7 @@ footer {
 
     <div class="card">
       <h3>📚 Learning Dashboard</h3>
-      <p>Choose a grade and stream, track study prompts, save lessons, and plan your study tasks.</p>
+      <p>Choose a grade, open available lessons, track learning progress, save topics, and plan your study tasks.</p>
       <a class="assistant-link" href="/learning/">Open learning dashboard</a>
     </div>
 

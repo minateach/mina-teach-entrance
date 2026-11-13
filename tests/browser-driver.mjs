@@ -21,7 +21,7 @@ export async function browserDriver() {
     }
     socket=new WebSocket(tab.webSocketDebuggerUrl);
     await new Promise((resolve,reject)=>{socket.addEventListener("open",resolve,{once:true});socket.addEventListener("error",reject,{once:true});});
-    const pending=new Map(),exceptions=[],requests=[];let sequence=0,interceptor;
+    const pending=new Map(),exceptions=[],requests=[],responses=[];let sequence=0,interceptor;
     const command=(method,params={})=>new Promise((resolve,reject)=>{
       const id=++sequence;
       const timer=setTimeout(()=>{pending.delete(id);reject(new Error(`Browser command timed out: ${method}`));},20000);
@@ -34,6 +34,7 @@ export async function browserDriver() {
         if(message.error)item.reject(new Error(message.error.message));else item.resolve(message.result);
       } else if(message.method==="Runtime.exceptionThrown")exceptions.push(message.params.exceptionDetails.exception?.description || message.params.exceptionDetails.text);
       else if(message.method==="Network.requestWillBeSent")requests.push(message.params.request.url);
+      else if(message.method==="Network.responseReceived")responses.push({url:message.params.response.url,status:message.params.response.status});
       else if(message.method==="Fetch.requestPaused") {
         Promise.resolve(interceptor?.(message.params.request)).then(result=>result
           ? command("Fetch.fulfillRequest",{requestId:message.params.requestId,responseCode:result.status || 200,responseHeaders:[{name:"Content-Type",value:"application/json"}],body:Buffer.from(JSON.stringify(result.body)).toString("base64")})
@@ -51,8 +52,8 @@ export async function browserDriver() {
       throw new Error(`Timed out: ${expression}\n${await evaluate("document.body.innerText.slice(0,1500)")}`);
     };
     await command("Page.enable");await command("Runtime.enable");await command("Network.enable");
-    return {command,evaluate,waitFor,requests,exceptions,
-      async intercept(handler) {interceptor=handler;await command("Fetch.enable",{patterns:[{urlPattern:"*api/learning/*",requestStage:"Request"}]});},
+    return {command,evaluate,waitFor,requests,exceptions,responses,
+      async intercept(handler,patterns=["*api/learning/*"]) {interceptor=handler;await command("Fetch.enable",{patterns:patterns.map(urlPattern=>({urlPattern,requestStage:"Request"}))});},
       async stopIntercept(){await command("Fetch.disable");interceptor=null;},
       async close(){
         await fetch(`${debug}/json/close/${tab.id}`).catch(()=>{});socket.close();child.kill("SIGTERM");

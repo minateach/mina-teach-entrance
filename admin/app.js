@@ -1,6 +1,7 @@
 (() => {
   const $ = id => document.getElementById(id);
   let editingId = null, editingLessonId = null, questions = [];
+  let nextLessonOffset=null;
   async function api(url, options={}) {
     const response = await fetch(url,{credentials:"same-origin",...options,headers:{"Content-Type":"application/json",...(options.headers||{})}});
     const data=await response.json();
@@ -31,10 +32,11 @@
       card.append(meta,title,source,actions);list.append(card);
     });
   }
-  async function loadLessons(){
-    const root=$("lesson-admin-list");root.replaceChildren();
+  async function loadLessons(append=false){
+    const root=$("lesson-admin-list");if(!append)root.replaceChildren();
     try{
-      const result=await api("/api/learning/lessons/manage");
+      const result=await api(`/api/learning/lessons/manage?offset=${append?nextLessonOffset:0}`);
+      nextLessonOffset=result.nextOffset;$("load-more-lessons").hidden=nextLessonOffset===null;
       if(!result.lessons.length){$("lesson-admin-status").textContent="No lesson drafts or published lessons yet.";return;}
       $("lesson-admin-status").textContent=`${result.lessons.length} lessons loaded.`;
       result.lessons.forEach(lesson=>{
@@ -50,10 +52,13 @@
       });
     }catch(e){$("lesson-admin-status").textContent=e.message;}
   }
-  function editLesson(lesson){
-    editingLessonId=lesson.id;const f=$("lesson-form");
-    for(const [key,value] of Object.entries({grade:lesson.grade,stream:lesson.stream,subject:lesson.subject,chapter:lesson.chapter,title:lesson.title,language:lesson.language,content:lesson.content,examples:(lesson.examples||[]).join("\n"),keyPoints:(lesson.keyPoints||[]).join("\n"),sourceLabel:lesson.sourceLabel,sourceUrl:lesson.sourceUrl||""}))if(f.elements[key])f.elements[key].value=value;
-    f.querySelector("button[type=submit]").textContent="Save lesson draft";$("cancel-lesson-edit").hidden=false;f.scrollIntoView({behavior:"smooth",block:"start"});
+  async function editLesson(summary){
+    try {
+      const {lesson}=await api(`/api/learning/lessons/manage/${summary.id}`);
+      editingLessonId=lesson.id;const f=$("lesson-form");
+      for(const [key,value] of Object.entries({grade:lesson.grade,stream:lesson.stream,subject:lesson.subject,chapter:lesson.chapter,title:lesson.title,language:lesson.language,content:lesson.content,examples:(lesson.examples||[]).join("\n"),keyPoints:(lesson.keyPoints||[]).join("\n"),materialsJson:JSON.stringify(lesson.materials || [],null,2),sourceLabel:lesson.sourceLabel,sourceUrl:lesson.sourceUrl||""}))if(f.elements[key])f.elements[key].value=value;
+      f.querySelector("button[type=submit]").textContent="Save lesson draft";$("cancel-lesson-edit").hidden=false;f.scrollIntoView({behavior:"smooth",block:"start"});
+    }catch(error){$("lesson-admin-status").textContent=error.message;}
   }
   function resetLessonForm(){editingLessonId=null;$("lesson-form").reset();$("lesson-form").querySelector("button[type=submit]").textContent="Save lesson draft";$("cancel-lesson-edit").hidden=true;}
   function editQuestion(q){
@@ -109,8 +114,20 @@
   $("lesson-form").addEventListener("submit",async event=>{
     event.preventDefault();const f=new FormData(event.currentTarget),payload=Object.fromEntries(f.entries());
     payload.grade=Number(payload.grade);payload.examples=payload.examples.split("\n").map(x=>x.trim()).filter(Boolean);payload.keyPoints=payload.keyPoints.split("\n").map(x=>x.trim()).filter(Boolean);
-    try{await api(editingLessonId?`/api/learning/lessons/${editingLessonId}`:"/api/learning/lessons",{method:editingLessonId?"PUT":"POST",body:JSON.stringify(payload)});$("lesson-form-status").textContent="Saved as a draft; reviewer approval is required before students can see it.";resetLessonForm();await loadLessons();}
+    try{payload.materials=JSON.parse(payload.materialsJson || "[]");delete payload.materialsJson;await api(editingLessonId?`/api/learning/lessons/${editingLessonId}`:"/api/learning/lessons",{method:editingLessonId?"PUT":"POST",body:JSON.stringify(payload)});$("lesson-form-status").textContent="Saved as a draft; reviewer approval is required before students can see it.";resetLessonForm();await loadLessons();}
     catch(e){$("lesson-form-status").textContent=e.message;}
+  });
+  $("load-more-lessons").onclick=()=>loadLessons(true);
+  $("material-form").addEventListener("submit",async event=>{
+    event.preventDefault();
+    const form=event.currentTarget;
+    if(!editingLessonId){$("material-form-status").textContent="Edit an existing lesson first.";return;}
+    try {
+      const material=JSON.parse(form.elements.material.value);
+      await api(`/api/learning/lessons/${editingLessonId}/materials`,{method:"POST",body:JSON.stringify(material)});
+      $("material-form-status").textContent="Full section appended as draft. Existing sections were preserved.";
+      form.reset();await editLesson({id:editingLessonId});await loadLessons();
+    }catch(error){$("material-form-status").textContent=error.message;}
   });
   $("status-filter").addEventListener("change",renderQuestions);
   $("import-form").addEventListener("submit",async event=>{

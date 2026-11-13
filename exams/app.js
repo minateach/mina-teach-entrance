@@ -4,6 +4,7 @@
   let available = 0, attempt = null, position = 0, answers = {}, chosen = null, timerId = null, remaining = 60, editingQuestionId = null, submitting = false, transitioning = false;
   let remainingByQuestion = {}, deadlinesByQuestion = {}, correctByQuestion = {}, practiceFeedback = {};
   const examStorageKey="mina-teach-active-exam-v1";
+  let countVersion=0,initialFilterError="",selection=null,pendingSaved=null,starting=false,invalidSavedState=false;
   async function api(url, options={}) {
     const response = await fetch(url, { credentials:"same-origin", ...options, headers:{"Content-Type":"application/json",...(options.headers||{})} });
     const body = await response.json();
@@ -12,23 +13,42 @@
   }
   function query() { const params = new URLSearchParams(Object.entries(filters()).filter(([,v])=>v!==""&&v!=null)); return params.toString(); }
   async function updateCount() {
+    const version=++countVersion;
     $("start-exam").disabled=true; $("bank-status").textContent="Checking reviewed question count…";
+    if(initialFilterError){$("bank-status").textContent=initialFilterError;return;}
     try {
       const entrance=$("mode").value==="entrance",required=entrance?60:Number($("question-count").value);
-      const result=await api(`/api/questions?${entrance?"":query()}`); available=result.count;
+      const result=await api(`/api/questions?${entrance?"":query()}`);
+      if(version!==countVersion)return;
+      available=result.count;
       $("bank-status").textContent=available>=required ? `${available} reviewed questions available. This session will contain ${required} questions.` : `${required} reviewed questions are required to start. ${available} currently match this selection.`;
-      $("start-exam").disabled=available<required;
-    } catch(e) { $("bank-status").textContent=e.message; }
+      $("start-exam").disabled=starting || available<required;
+    } catch(e) { if(version===countVersion)$("bank-status").textContent=e.message; }
   }
   function saveAttemptState(){
     if(!attempt)return;
-    try{sessionStorage.setItem(examStorageKey,JSON.stringify({attempt,position,answers,remainingByQuestion,deadlinesByQuestion,correctByQuestion,practiceFeedback}));}catch{}
+    try{sessionStorage.setItem(examStorageKey,JSON.stringify({attempt,selection,position,answers,remainingByQuestion,deadlinesByQuestion,correctByQuestion,practiceFeedback}));}catch{}
   }
   function clearSavedAttempt(){try{sessionStorage.removeItem(examStorageKey);}catch{}}
-  function restoreAttemptState(){
+  function restoreAttemptState(force=false){
     try{
       const state=JSON.parse(sessionStorage.getItem(examStorageKey)||"null");
       if(!state?.attempt?.attemptId||!Array.isArray(state.attempt.questions)||!state.attempt.questions.length)return false;
+      if(!state.attempt.questions.every(question=>question.id!=null && typeof question.prompt==="string" && typeof question.sourceKind==="string" && question.sourceKind.trim() && typeof question.sourceLabel==="string" && question.sourceLabel.trim() && Array.isArray(question.choices) && question.choices.length===4 && question.choices.every(choice=>typeof choice==="string"))) {
+        pendingSaved=state;invalidSavedState=true;return false;
+      }
+      const oneValue=key=>{const values=[...new Set(state.attempt.questions.map(question=>question[key]).filter(value=>value!=null))];return values.length===1?values[0]:null;};
+      const context=state.selection || {mode:state.attempt.mode || "entrance",grade:oneValue("grade"),subject:oneValue("subject"),topic:oneValue("chapter"),stream:oneValue("stream"),difficulty:oneValue("difficulty"),questionCount:state.attempt.total || state.attempt.questions.length};
+      const hasScope=["grade","subject","topic","mode","stream","difficulty","question-count"].some(key=>initialFilters.has(key));
+      if(!force && (hasScope || initialFilterError)) {
+        const requested={...filters(),mode:$("mode").value};
+        const matches=["mode","grade","subject","topic"].every(key=>String(context[key] ?? "")===String(requested[key] ?? ""));
+        const sameStream=context.stream==="common" || context.stream===requested.stream;
+        const sameDifficulty=!initialFilters.has("difficulty") || String(context.difficulty ?? "")===requested.difficulty;
+        const sameCount=requested.mode==="entrance" || !initialFilters.has("question-count") || Number(context.questionCount || state.attempt.total || state.attempt.questions.length)===Number($("question-count").value);
+        if(initialFilterError || !matches || !sameStream || !sameDifficulty || !sameCount){pendingSaved=state;return false;}
+      }
+      selection=context;
       attempt=state.attempt;attempt.mode=attempt.mode||"entrance";position=Math.max(0,Math.min(Number(state.position)||0,attempt.questions.length-1));
       answers=state.answers&&typeof state.answers==="object"?state.answers:{};
       remainingByQuestion=state.remainingByQuestion&&typeof state.remainingByQuestion==="object"?state.remainingByQuestion:{};
@@ -203,32 +223,83 @@
     }catch(e){$("import-status").textContent=e.message==="Unexpected end of JSON input"?"The selected file is not valid JSON.":e.status===403?"Educator access has not been assigned to this account.":e.message;}
   });
   const initialFilters=new URLSearchParams(location.search);
-  for(const id of ["grade","stream","subject","topic"]){const value=initialFilters.get(id);if(value&&$(id)&&[...$(id).options||[]].some(option=>option.value===value)||id==="topic"&&value)$(id).value=value;}
-  function configureMode(){
+  for(const id of ["grade","stream","subject","topic","mode","difficulty","question-count"]) {
+    let value=initialFilters.get(id);if(value===null)continue;
+    if(id==="subject" && value==="Civics")value="Civics and Ethics";
+    if(id==="topic" && value.length<=120 || id!=="topic" && [...$(id).options].some(option=>option.value===value))$(id).value=value;
+    else initialFilterError="This practice link has an invalid selection. Choose valid filters or return to learning; no different subject has been substituted.";
+  }
+  function setReturnLink(candidate=initialFilters.get("returnTo")) {
+    const fallback=`/learning/?${new URLSearchParams({grade:$("grade").value,...($("subject").value?{subject:$("subject").value}:{})})}`;
+    let target=fallback;
+    try{
+      const url=new URL(candidate,location.origin);
+      if(typeof candidate==="string" && candidate.startsWith("/learning/") && !candidate.includes("\\") && url.origin===location.origin && url.pathname==="/learning/")target=url.pathname+url.search+url.hash;
+    }catch{}
+    $("return-to-learning").href=target;
+  }
+  setReturnLink();
+  function configureMode(refresh=true){
     const entrance=$("mode").value==="entrance";
     $("subject-filters").hidden=entrance;$("question-count-wrap").hidden=entrance;
     $("start-exam").textContent=entrance?"Start entrance mock":"Start practice";
     $("count-guidance").textContent=entrance?"Entrance mock exams mix 60 approved questions from Grades 9–12 and relevant subjects.":"Practice sessions give answer feedback and support retrying incorrect questions.";
+    if(refresh)updateCount();
+  }
+  function filtersChanged() {
+    initialFilterError="";setReturnLink();
+    const params=new URLSearchParams(location.search);
+    for(const [key,value] of Object.entries({...filters(),mode:$("mode").value}))value===""?params.delete(key):params.set(key,String(value));
+    params.set("question-count",$("question-count").value);
+    history.replaceState({},"",`/exams/?${params}`);
     updateCount();
   }
-  ["grade","stream","subject","difficulty","question-count"].forEach(id=>$(id).addEventListener("change",updateCount));
-  $("mode").addEventListener("change",configureMode);
-  $("topic").addEventListener("input",()=>{clearTimeout(window.topicFilterTimer);window.topicFilterTimer=setTimeout(updateCount,250);});
+  ["grade","stream","subject","difficulty","question-count"].forEach(id=>$(id).addEventListener("change",filtersChanged));
+  $("mode").addEventListener("change",()=>{configureMode(false);filtersChanged();});
+  $("topic").addEventListener("input",()=>{clearTimeout(window.topicFilterTimer);window.topicFilterTimer=setTimeout(filtersChanged,250);});
   $("start-exam").onclick=async()=>{
+    if(starting || $("start-exam").disabled)return;
+    starting=true;$("start-exam").disabled=true;
+    const controls=["grade","stream","subject","topic","mode","difficulty","question-count"].map(id=>$(id));
+    const disabled=controls.map(control=>control.disabled);controls.forEach(control=>{control.disabled=true;});
     try{
+      if(pendingSaved && !window.confirm("Starting a new session replaces the previous resume position on this device. Its server record is not deleted. Continue?"))return;
       const mode=$("mode").value,count=mode==="entrance"?60:Number($("question-count").value);
       const fresh=await api("/api/exams",{method:"POST",body:JSON.stringify({...filters(),mode,questionCount:count})});
       if(fresh.total!==count)throw new Error(`This session requires exactly ${count} questions.`);
-      attempt=fresh;answers={};position=0;remainingByQuestion={};deadlinesByQuestion={};correctByQuestion={};practiceFeedback={};submitting=false;transitioning=false;
+      attempt=fresh;selection={...filters(),mode,questionCount:count,returnTo:new URL($("return-to-learning").href).pathname+new URL($("return-to-learning").href).search};pendingSaved=null;
+      $("resume-notice").hidden=true;answers={};position=0;remainingByQuestion={};deadlinesByQuestion={};correctByQuestion={};practiceFeedback={};submitting=false;transitioning=false;
       clearSavedAttempt();$("submit-exam").disabled=false;$("setup").hidden=true;$("exam").hidden=false;renderQuestion();saveAttemptState();
     }
     catch(e){$("bank-status").textContent=e.status===401?"Sign in before starting an exam.":e.message;}
+    finally {
+      starting=false;controls.forEach((control,index)=>{control.disabled=disabled[index];});
+      const required=$("mode").value==="entrance"?60:Number($("question-count").value);
+      $("start-exam").disabled=$("setup").hidden || !!initialFilterError || available<required;
+    }
   };
   $("next").onclick=nextQuestion;
   $("previous").onclick=previousQuestion;
   $("submit-exam").onclick=submitExam;
   $("retry-wrong").onclick=()=>{const index=attempt?.questions.findIndex(q=>correctByQuestion[String(q.id)]===false)??-1;if(index>=0)goToQuestion(index);};
-  if(restoreAttemptState()){$("mode").value=attempt.mode;$("setup").hidden=true;$("exam").hidden=false;renderQuestion();}
+  function showRestoredAttempt() {
+    for(const id of ["grade","stream","subject","topic","mode"])if(selection?.[id]!=null) {
+      const value=String(selection[id]);if(id==="topic" || [...$(id).options].some(option=>option.value===value))$(id).value=value;
+    }
+    $("mode").value=attempt.mode;initialFilterError="";
+    if(selection?.questionCount && [...$("question-count").options].some(option=>option.value===String(selection.questionCount)))$("question-count").value=String(selection.questionCount);
+    setReturnLink(selection?.returnTo);
+    $("setup").hidden=true;$("exam").hidden=false;$("resume-notice").hidden=true;renderQuestion();
+  }
+  if(restoreAttemptState())showRestoredAttempt();
+  else if(pendingSaved) {
+    $("resume-notice").hidden=false;
+    $("resume-saved").disabled=invalidSavedState;
+    $("resume-message").textContent=invalidSavedState
+      ?"The saved session is missing required question or source data and cannot be resumed safely. Its stored data has been preserved. You may return to learning or choose a new available practice set."
+      :"A different unfinished session is saved on this device. It has not replaced the grade, subject, or topic you selected.";
+  }
+  $("resume-saved").onclick=()=>{if(restoreAttemptState(true)){pendingSaved=null;showRestoredAttempt();configureMode();}};
   configureMode();
   async function initializeAccount(){try{const status=await api("/api/account/status");if(!status.signedIn){$("history-list").textContent="Sign in to save exam results."; $("saved-questions").textContent="Sign in to view saved questions."; return;}await Promise.all([loadHistory(),loadBookmarks(),loadEducator()]);}catch{}}
   initializeAccount();
