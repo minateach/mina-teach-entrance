@@ -112,7 +112,8 @@
   }
   function openLesson(lesson) {
     current = lesson;
-    $("lesson-subject").textContent = `GRADE ${grade.value} · ${lesson.subject}`;
+    const lessonGrade = Number(lesson.grade) || Number(grade.value);
+    $("lesson-subject").textContent = `GRADE ${lessonGrade} · ${lesson.subject}`;
     $("lesson-title").textContent = lesson.title;
     $("lesson-content").textContent = lesson.content || "This is a study organizer, not a verified lesson. Use your textbook or ask the AI tutor for an explanation.";
     const source=$("lesson-source");source.replaceChildren();
@@ -122,11 +123,19 @@
     $("lesson-examples-wrap").hidden = !examples.length; $("lesson-points-wrap").hidden = !points.length;
     $("lesson-examples").replaceChildren(...examples.map(text => { const li=document.createElement("li");li.textContent=text;return li; }));
     $("lesson-points").replaceChildren(...points.map(text => { const li=document.createElement("li");li.textContent=text;return li; }));
-    const query = new URLSearchParams({grade:grade.value,stream:stream.value,subject:lesson.subject,topic:lesson.chapter||""});
+    const query = new URLSearchParams({grade:String(lessonGrade),stream:lesson.stream || stream.value,subject:lesson.subject,topic:lesson.chapter||""});
     $("practice-lesson").href = `/exams/?${query.toString()}`;
     const saved = state.saved.some(item => item.key === lesson.key);
     $("save-lesson").textContent = saved ? "★ Saved" : "☆ Save lesson";
-    $("complete-lesson").textContent = state.completed.includes(lesson.key) ? "Completed ✓" : "Mark complete";
+    const hasReviewedContent = lesson.isPublishedLesson === true &&
+      typeof lesson.content === "string" && lesson.content.trim().length >= 80 &&
+      typeof lesson.sourceLabel === "string" && lesson.sourceLabel.trim().length > 0;
+    const completeButton = $("complete-lesson");
+    completeButton.disabled = !hasReviewedContent;
+    completeButton.textContent = state.completed.includes(lesson.key) ? "Completed ✓" : "Mark complete";
+    $("lesson-completion-note").textContent = hasReviewedContent
+      ? "After studying this reviewed lesson, confirm to record it as completed."
+      : "This is a study prompt, not a complete reviewed lesson. Completion is unavailable.";
     dialog.showModal();
   }
   function renderLessons(lessons) {
@@ -138,7 +147,7 @@
       const meta=document.createElement("p");meta.textContent=`Grade ${lesson.grade} · ${lesson.subject} · ${lesson.chapter}`;
       const title=document.createElement("h3");title.textContent=lesson.title;
       const language=document.createElement("p");language.textContent={en:"English",om:"Afaan Oromoo",am:"Amharic"}[lesson.language]||lesson.language;
-      const open=document.createElement("button");open.type="button";open.textContent="Open lesson";open.addEventListener("click",()=>openLesson({...lesson,key:`lesson:${lesson.id}`}));
+      const open=document.createElement("button");open.type="button";open.textContent="Open lesson";open.addEventListener("click",()=>openLesson({...lesson,isPublishedLesson:true,key:`lesson:${lesson.id}`}));
       card.append(meta,title,language,open);root.append(card);
     });
   }
@@ -166,6 +175,10 @@
   });
   $("complete-lesson").addEventListener("click", () => {
     if (!current) return;
+    const hasReviewedContent = current.isPublishedLesson === true &&
+      typeof current.content === "string" && current.content.trim().length >= 80 &&
+      typeof current.sourceLabel === "string" && current.sourceLabel.trim().length > 0;
+    if (!hasReviewedContent || !window.confirm("Have you studied this reviewed lesson and want to mark it complete?")) return;
     if (!state.completed.includes(current.key)) state.completed.push(current.key);
     persist(); $("complete-lesson").textContent = "Completed ✓"; renderSubjects();
   });
