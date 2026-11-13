@@ -67,6 +67,7 @@ function AccountPage() {
           try { imported[type] = JSON.parse(raw); } catch { throw new Error(`Your local ${type} data could not be read. Nothing was imported.`); }
         }
       }
+      if (imported.learning && typeof imported.learning === "object") delete imported.learning._lessonPracticeDrafts;
       if (!Object.keys(imported).length) { setNotice("No existing local study data was found. Your browser data was not changed."); return; }
       const result = await request("/api/account/import", { method: "POST", body: JSON.stringify({ records: imported }) });
       setRecords(result.records); setNotice("Study data was copied to your account. The original browser data remains on this device.");

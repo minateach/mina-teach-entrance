@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {browserDriver} from "./browser-driver.mjs";
+import {checkLessonPracticeRecovery} from "./lesson-practice-browser.mjs";
 if(!process.env.REPLIT_DEV_DOMAIN)throw new Error("REPLIT_DEV_DOMAIN is required.");
 const origin=`https://${process.env.REPLIT_DEV_DOMAIN}`;
 const browser=await browserDriver();
@@ -87,6 +88,7 @@ try {
   const courseData=(await json("/api/learning/course?grade=10&subject=History")).data;
   assert.ok(JSON.stringify(courseData).length<8000);
   const lessons=courseData.chapters.flatMap(chapter=>chapter.lessons);
+  await checkLessonPracticeRecovery({browser,navigate,json,lessons,course});
   for(const meta of lessons) {
     const detail=(await json(`/api/learning/content/${meta.id}`)).data.lesson;
     assert.equal(detail.questions.length,10);
@@ -96,19 +98,29 @@ try {
     assert.match(nav,/Previous lesson/);assert.match(nav,/Next lesson/);
     if(meta===lessons[0])assert.equal(await evaluate('document.querySelector(".lesson-page nav button").disabled'),true);
     await evaluate('document.getElementById("start-practice").click()');
-    for(const question of detail.questions) {
+    await waitFor('!document.getElementById("lesson-practice").hidden && document.querySelector(".history-choice, #restart-lesson-practice")');
+    if(await evaluate('!!document.getElementById("restart-lesson-practice")')) {
+      await evaluate('document.getElementById("restart-lesson-practice").click()');
+      await waitFor('document.querySelector(".history-choice")');
+    }
+    for(const [index,question] of detail.questions.entries()) {
       await evaluate(`document.querySelectorAll(".history-choice")[${question.answer}].click()`);
+      await waitFor('document.querySelector(".quiz-feedback")');
       assert.match(await evaluate('document.querySelector(".quiz-feedback").textContent'),/Correct answer:/);
       await evaluate('document.getElementById("lesson-practice").lastElementChild.click()');
+      await waitFor(index===detail.questions.length-1?'document.getElementById("lesson-practice").textContent.includes("Practice complete")':`document.querySelector("#lesson-practice h3")?.textContent==="Question ${index+2} of ${detail.questions.length}"`);
     }
     assert.match(await evaluate('document.getElementById("lesson-practice").textContent'),/10 \/ 10/);
   }
   await evaluate('document.querySelector(".history-quiz button").click()');
+  await waitFor('document.querySelector(".history-choice")');
   const last=(await json(`/api/learning/content/${lessons.at(-1).id}`)).data.lesson;
   for(const [index,q] of last.questions.entries()) {
     await evaluate(`document.querySelectorAll(".history-choice")[${index===0?(q.answer+1)%4:q.answer}].click()`);
+    await waitFor('document.querySelector(".quiz-feedback")');
     if(index===0)assert.match(await evaluate('document.querySelector(".quiz-feedback").textContent'),/Not quite/);
     await evaluate('document.getElementById("lesson-practice").lastElementChild.click()');
+    await waitFor(index===last.questions.length-1?'document.getElementById("lesson-practice").textContent.includes("Practice complete")':`document.querySelector("#lesson-practice h3")?.textContent==="Question ${index+2} of ${last.questions.length}"`);
   }
   assert.match(await evaluate('document.getElementById("lesson-practice").textContent'),/9 \/ 10/);
   const previousHref=await evaluate('document.querySelector(".lesson-page nav a").getAttribute("href")');

@@ -119,7 +119,16 @@ try {
   assert.match(await evaluate('document.getElementById("lesson-topic-progress").textContent'),/2 of 2/);
   await evaluate('document.getElementById("start-practice").click()');
   await waitFor('document.querySelectorAll("#lesson-practice .history-choice").length===4');
-  await evaluate('document.querySelectorAll("#lesson-practice .history-choice")[1].click();document.querySelector("#lesson-practice button:not(.history-choice)").click()');
+  await evaluate('document.querySelectorAll("#lesson-practice .history-choice")[1].click()');
+  await waitFor('document.querySelector("#lesson-practice .quiz-feedback")');
+  await command("Page.reload");
+  await waitFor('document.getElementById("start-practice")');
+  await evaluate('document.getElementById("start-practice").click()');
+  await waitFor('document.getElementById("resume-lesson-practice")');
+  await evaluate('document.getElementById("resume-lesson-practice").click()');
+  await waitFor('document.querySelector("#lesson-practice .quiz-feedback")');
+  await evaluate('document.querySelector("#lesson-practice button:not(.history-choice)").click()');
+  await waitFor('document.getElementById("lesson-practice").textContent.includes("Practice complete")');
   assert.match(await evaluate('document.getElementById("lesson-practice").textContent'),/1 \/ 1/);
   assert.equal(await evaluate('JSON.parse(localStorage.getItem("minaTeach.learning.v1")).practice[0].kind'),"published_lesson");
   assert.match(await evaluate("location.search"),/material=timeline/);

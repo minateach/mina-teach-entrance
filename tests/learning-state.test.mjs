@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 const source=readFileSync(new URL("../learning/learning-state.js",import.meta.url),"utf8");
-const {normalizeState,mergeLearning,createStore,STORAGE_KEY,topicIsComplete}=await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
+const {normalizeState,mergeLearning,createStore,STORAGE_KEY,topicIsComplete,practiceContentVersion,validPracticeDraft}=await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
 function storage() {
   const entries=new Map();
   return {getItem:key=>entries.get(key)||null,setItem:(key,value)=>entries.set(key,value),entries};
@@ -83,4 +83,54 @@ test("topic progress is normalized, merged, and restored without marking a whole
   store.state.completedTopics.push("lesson:2:topic:0");store.save();
   const restored=createStore();await restored.initialize();
   assert.equal(topicIsComplete(restored.state,"lesson:2:topic:0"),true);
+});
+const lesson={id:"lesson-test",grade:10,subject:"History",language:"en",
+  questions:[{prompt:"One?",choices:["A","B","C","D"],answer:1,explanation:"Because B."},
+    {prompt:"Two?",choices:["A","B","C","D"],answer:2,explanation:"Because C."}]};
+const draft=()=>({version:1,id:"stable-attempt",contentVersion:practiceContentVersion(lesson),index:1,answers:[0,2]});
+test("lesson drafts require exact content and valid sequential answers/position",()=>{
+  assert.equal(validPracticeDraft(draft(),lesson),true);
+  for(const patch of [{version:2},{id:null},{index:2},{index:-1},{answers:[null,1]},{answers:[0,4]},{answers:[0]},{answers:["0",null]}])
+    assert.equal(validPracticeDraft({...draft(),...patch},lesson),false);
+  for(const field of ["prompt","choices","answer","explanation"]) {
+    const changed=structuredClone(lesson);
+    changed.questions[0][field]=field==="choices"?["B","A","C","D"]:field==="answer"?0:"Changed";
+    assert.equal(validPracticeDraft(draft(),changed),false,field);
+  }
+});
+test("drafts stay on one device and account, survive sync, and never enter cloud payloads",async()=>{
+  const device=storage();globalThis.localStorage=device;
+  let user=null;const writes=[];
+  globalThis.fetch=async(url,options={})=>{
+    if(url==="/api/account/status")return response({signedIn:!!user,userId:user});
+    if(options.method==="PUT"){writes.push(JSON.parse(options.body));return response({saved:true});}
+    return response({records:{learning:{_lessonPracticeDrafts:{"lesson-test":draft()},completed:["remote"]}}});
+  };
+  const guest=createStore();await guest.initialize();guest.writePracticeDraft(lesson.id,draft());
+  user="A";const a=createStore();await a.initialize();
+  assert.equal(a.readPracticeDraft(lesson.id),null,"ignore remote and guest drafts");
+  a.writePracticeDraft(lesson.id,draft());a.save();await a.retry();
+  assert.equal(writes[0].data._lessonPracticeDrafts,undefined);
+  const restored=createStore();await restored.initialize();assert.deepEqual(restored.readPracticeDraft(lesson.id),draft());
+  assert.equal(restored.readPracticeDraft("different-lesson"),null);
+  user="B";const b=createStore();await b.initialize();assert.equal(b.readPracticeDraft(lesson.id),null);
+  await assert.rejects(a.confirmPracticeIdentity(),/account changed/);
+  user=null;const signedOut=createStore();await signedOut.initialize();assert.deepEqual(signedOut.readPracticeDraft(lesson.id),draft());
+  globalThis.localStorage=storage();const otherDevice=createStore();await otherDevice.initialize();assert.equal(otherDevice.readPracticeDraft(lesson.id),null);
+  globalThis.localStorage=device;
+});
+test("completion removes draft and records one result per stable attempt, including stale views",async()=>{
+  globalThis.localStorage=storage();globalThis.fetch=async()=>response({signedIn:false});
+  const first=createStore();await first.initialize();first.writePracticeDraft(lesson.id,draft());
+  const stale=createStore();await stale.initialize();
+  const result={id:draft().id,score:1,total:2,completedAt:new Date().toISOString()};
+  first.writePracticeDraft(lesson.id,null,result);
+  stale.writePracticeDraft(lesson.id,null,result);
+  assert.equal(stale.readPracticeDraft(lesson.id),null);
+  assert.equal(stale.state.practice.length,1);
+  const restored=createStore();await restored.initialize();assert.equal(restored.state.practice.length,1);
+  restored.writePracticeDraft(lesson.id,null,{...result,id:"intentional-retry"});
+  assert.equal(restored.state.practice.length,2,"intentional retries remain distinct");
+  localStorage.setItem=()=>{throw new Error("quota");};
+  assert.throws(()=>restored.writePracticeDraft(lesson.id,draft()),/could not be saved/);
 });

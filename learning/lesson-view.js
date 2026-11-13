@@ -1,4 +1,4 @@
-import {api,topicIsComplete} from "./learning-state.js";
+import {api,topicIsComplete,practiceContentVersion,validPracticeDraft} from "./learning-state.js";
 import {appendFullText,appendValue,mountMaterialReader} from "./material-reader.js";
 
 export function node(tag,text,className) {
@@ -76,6 +76,7 @@ export function renderLesson({root,lesson,course,store,changed}) {
   const practice=makeButton("Start practice",async()=>{
     practice.disabled=true;
     try {
+      await store.confirmPracticeIdentity();
       if(!lesson.questions?.length) {
         practiceStatus.textContent="Retrieving every MCQ section for this lesson…";
         const questions=[];
@@ -91,7 +92,7 @@ export function renderLesson({root,lesson,course,store,changed}) {
         lesson.questions=questions;
       }
       practiceStatus.textContent=`${lesson.questions.length} lesson questions loaded. This is separate from the verified exam bank.`;
-      quiz.hidden=false;showQuestion();quiz.scrollIntoView({behavior:"smooth",block:"start"});
+      quiz.hidden=false;offerPractice();quiz.scrollIntoView({behavior:"smooth",block:"start"});
     }catch(error){practiceStatus.textContent=error.message;}
     finally{practice.disabled=false;}
   });
@@ -219,38 +220,89 @@ export function renderLesson({root,lesson,course,store,changed}) {
   controls.after(nav);
   root.append(nav.cloneNode(true));
   const quiz=node("section",undefined,"history-quiz");quiz.hidden=true;quiz.id="lesson-practice";quiz.setAttribute("aria-live","polite");root.append(quiz);
-  let index=0,score=0,answered=false,recorded=false;
+  let index=0,score=0,answered=false,recorded=false,attemptId=null,busy=false;
   const responses=new Map();
+  function saveDraft() {
+    store.writePracticeDraft(lesson.id,{version:1,id:attemptId,contentVersion:practiceContentVersion(lesson),index,
+      answers:lesson.questions.map((_,i)=>responses.get(i)??null)});
+  }
+  function guarded(action,requiresDraft=false) {
+    return async()=>{
+      if(busy)return;busy=true;
+      quiz.querySelector(".lesson-practice-error")?.remove();
+      try {
+        await store.confirmPracticeIdentity();
+        if(!root.isConnected)return;
+        if(requiresDraft && store.readPracticeDraft(lesson.id)?.id!==attemptId)
+          throw new Error("This practice was finished or restarted in another tab. Reopen practice to continue.");
+        await action();
+      } catch(error) {
+        practiceStatus.textContent=error.message;
+        const message=node("p",error.message,"lesson-practice-error");message.setAttribute("role","alert");quiz.prepend(message);
+      }
+      finally {busy=false;}
+    };
+  }
+  function startNew() {
+    attemptId=crypto.randomUUID();index=0;score=0;answered=false;recorded=false;responses.clear();
+    saveDraft();showQuestion();
+  }
+  function offerPractice() {
+    const draft=store.readPracticeDraft(lesson.id);
+    if(draft && validPracticeDraft(draft,lesson)) {
+      quiz.replaceChildren(node("h3","Continue saved lesson practice?"),
+        node("p",`Question ${draft.index+1} of ${lesson.questions.length} · ${draft.answers.filter(answer=>answer!==null).length} answered. Saved only on this device for your current account or guest profile.`));
+      const resume=makeButton("Resume practice",guarded(()=>{
+        // Re-read rather than resurrecting a draft completed/restarted in another tab.
+        const current=store.readPracticeDraft(lesson.id);
+        if(!validPracticeDraft(current,lesson) || current.id!==draft.id){offerPractice();return;}
+        attemptId=current.id;index=current.index;recorded=false;responses.clear();
+        current.answers.forEach((answer,i)=>{if(answer!==null)responses.set(i,answer);});
+        showQuestion();
+      }));resume.id="resume-lesson-practice";
+      const restart=makeButton("Restart practice",guarded(startNew));restart.id="restart-lesson-practice";
+      quiz.append(resume,restart);
+    } else {
+      if(draft) {
+        store.writePracticeDraft(lesson.id,null);
+        practiceStatus.textContent="Saved practice expired because its questions changed or its saved answers were incompatible. Start a new practice.";
+        quiz.replaceChildren(node("p","The previous practice can no longer be resumed."),makeButton("Start new practice",guarded(startNew)));
+      } else startNew();
+    }
+  }
   function showQuestion() {
+    score=[...responses].filter(([questionIndex,answer])=>lesson.questions[questionIndex].answer===answer).length;
     quiz.replaceChildren();
     const back=node("a","Back to lesson content");back.href=requestedTopic===null?"#lesson-page":`#topic-${requestedTopic}`;
     back.addEventListener("click",event=>{event.preventDefault();quiz.hidden=true;(requestedTopic===null?root:document.getElementById(`topic-${requestedTopic}`) || root).scrollIntoView({behavior:"smooth",block:"start"});});
     quiz.append(back);
     if(index>=lesson.questions.length) {
       if(!recorded) {
-        recorded=true;
-        store.state.practice.unshift({id:crypto.randomUUID(),lesson:lesson.number || lesson.title,grade:lesson.grade,subject:lesson.subject,score,total:lesson.questions.length,completedAt:new Date().toISOString(),kind:lesson.origin==="ai_authored"?"ai_authored":"published_lesson"});
-        store.state.practice=store.state.practice.slice(0,50);store.save();changed();
+        store.writePracticeDraft(lesson.id,null,{id:attemptId,lesson:lesson.number || lesson.title,grade:lesson.grade,subject:lesson.subject,score,total:lesson.questions.length,completedAt:new Date().toISOString(),kind:lesson.origin==="ai_authored"?"ai_authored":"published_lesson"});
+        recorded=true;changed();
       }
-      quiz.append(node("h3",`Practice complete · ${score} / ${lesson.questions.length}`),makeButton("Try again",()=>{
-        index=0;score=0;answered=false;recorded=false;responses.clear();showQuestion();
-      }));return;
+      quiz.append(node("h3",`Practice complete · ${score} / ${lesson.questions.length}`),makeButton("Try again",guarded(startNew)));return;
     }
     const q=lesson.questions[index];answered=responses.has(index);
     quiz.append(node("h3",`Question ${index+1} of ${lesson.questions.length}`),node("p",q.prompt));
     function feedback(choiceIndex) {
       quiz.querySelectorAll(".history-choice").forEach(option=>{option.disabled=true;});
       quiz.append(node("p",`${choiceIndex===q.answer?"Correct.":"Not quite."} Correct answer: ${String.fromCharCode(65+q.answer)}. ${q.choices[q.answer]} ${q.explanation}`,"quiz-feedback"),
-        makeButton(index===lesson.questions.length-1?"See score":"Next question",()=>{index++;showQuestion();}));
+        makeButton(index===lesson.questions.length-1?"See score":"Next question",guarded(()=>{
+          const previous=index;index++;
+          try {if(index<lesson.questions.length)saveDraft();showQuestion();}
+          catch(error){index=previous;showQuestion();throw error;}
+        },true)));
     }
     q.choices.forEach((choice,choiceIndex)=>{
-      const button=makeButton(`${String.fromCharCode(65+choiceIndex)}. ${choice}`,()=>{
+      const button=makeButton(`${String.fromCharCode(65+choiceIndex)}. ${choice}`,guarded(()=>{
         if(answered)return;answered=true;
         responses.set(index,choiceIndex);
-        score=[...responses].filter(([questionIndex,answer])=>lesson.questions[questionIndex].answer===answer).length;
+        try {saveDraft();}catch(error){answered=false;responses.delete(index);throw error;}
+        button.setAttribute("aria-pressed","true");
         feedback(choiceIndex);
-      });
-      button.className="history-choice";quiz.append(button);
+      },true));
+      button.className="history-choice";button.setAttribute("aria-pressed",String(responses.get(index)===choiceIndex));quiz.append(button);
     });
     if(answered)feedback(responses.get(index));
   }
