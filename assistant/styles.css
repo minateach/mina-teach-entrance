@@ -704,6 +704,51 @@ a {
   background: #fbf3e5;
 }
 
+.message-research {
+  padding: 9px 12px;
+  border: 1px solid #e6e1d6;
+  border-radius: 10px;
+  color: var(--ink-muted);
+  background: #fffefa;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.message-research.searched {
+  border-color: #d8e5d9;
+  background: #f6faf5;
+}
+
+.research-status,
+.research-sources-heading {
+  margin: 0;
+}
+
+.research-sources-heading {
+  display: block;
+  margin-top: 7px;
+  color: var(--pine);
+}
+
+.research-sources {
+  display: grid;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding-left: 20px;
+}
+
+.research-sources a {
+  color: #285f82;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
+
+.research-sources a:focus-visible {
+  outline: 2px solid var(--pine);
+  outline-offset: 2px;
+}
+
 .message-time {
   color: #96958c;
   font-size: 9px;
@@ -842,11 +887,17 @@ a {
 
 .composer-help {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 12px;
   margin-top: 8px;
   color: #8a8b82;
   font-size: 10px;
+}
+
+.composer-help span:last-child {
+  max-width: 62ch;
+  line-height: 1.5;
 }
 
 .settings-row {

@@ -210,6 +210,51 @@ function createMessageNode(message) {
   content.className = "message-content";
   content.textContent = message.content;
 
+  let researchInfo = null;
+  if (message.role === "assistant" && message.webResearch && typeof message.webResearch === "object") {
+    researchInfo = document.createElement("aside");
+    researchInfo.className = `message-research${message.webResearch.searched ? " searched" : ""}`;
+    researchInfo.setAttribute("aria-label", "Web research status and citations");
+
+    const status = document.createElement("p");
+    status.className = "research-status";
+    status.textContent = String(message.webResearch.notice || (
+      message.webResearch.searched
+        ? "Searched the web. Review the cited sources."
+        : "No web search was performed; this answer is from general model knowledge."
+    ));
+    researchInfo.append(status);
+
+    const sources = Array.isArray(message.webResearch.sources)
+      ? message.webResearch.sources.slice(0, 12)
+      : [];
+    if (message.webResearch.searched && sources.length) {
+      const heading = document.createElement("strong");
+      heading.className = "research-sources-heading";
+      heading.textContent = "Sources";
+      const list = document.createElement("ol");
+      list.className = "research-sources";
+      for (const source of sources) {
+        if (typeof source?.url !== "string" || typeof source?.title !== "string") continue;
+        try {
+          const url = new URL(source.url);
+          if (url.protocol !== "https:") continue;
+          const item = document.createElement("li");
+          const link = document.createElement("a");
+          link.href = url.href;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          link.textContent = source.title.slice(0, 180) || url.hostname;
+          item.append(link);
+          list.append(item);
+        } catch {
+          // Invalid stored citation URLs are never rendered as links.
+        }
+      }
+      if (list.childElementCount) researchInfo.append(heading, list);
+    }
+  }
+
   const time = document.createElement("time");
   time.className = "message-time";
   time.dateTime = message.createdAt;
@@ -218,7 +263,9 @@ function createMessageNode(message) {
     ? ""
     : new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(date);
 
-  contentWrap.append(author, content, time);
+  contentWrap.append(author, content);
+  if (researchInfo) contentWrap.append(researchInfo);
+  contentWrap.append(time);
   wrapper.append(mark, contentWrap);
   return wrapper;
 }
@@ -319,7 +366,7 @@ function createTypingIndicator() {
   const indicator = document.createElement("div");
   indicator.className = "typing-indicator";
   indicator.setAttribute("role", "status");
-  indicator.setAttribute("aria-label", "Mina Teach is preparing a step-by-step explanation");
+  indicator.setAttribute("aria-label", "Checking whether current web sources are needed");
 
   const mark = document.createElement("span");
   mark.className = "message-mark";
@@ -330,7 +377,7 @@ function createTypingIndicator() {
   dots.setAttribute("aria-hidden", "true");
   for (let i = 0; i < 3; i += 1) dots.append(document.createElement("span"));
   const text = document.createElement("span");
-  text.textContent = "Mina is thinking through the steps";
+  text.textContent = "Checking whether current web sources are needed";
   indicator.append(mark, dots, text);
   return indicator;
 }
@@ -488,6 +535,7 @@ async function sendMessage(rawMessage, isRetry = false) {
   resizeInput();
   isLoading = true;
   updateSendButton();
+  setStatus("checking", "Checking if web search is needed");
   renderConversation();
 
   const history = (isRetry ? priorMessages.slice(0, -1) : priorMessages).map((message) => ({
@@ -521,6 +569,18 @@ async function sendMessage(rawMessage, isRetry = false) {
       id: makeId(),
       role: "assistant",
       content: result.answer,
+      webResearch: result.webResearch && typeof result.webResearch === "object"
+        ? {
+            searched: result.webResearch.searched === true,
+            notice: typeof result.webResearch.notice === "string" ? result.webResearch.notice.slice(0, 400) : "",
+            sources: Array.isArray(result.webResearch.sources)
+              ? result.webResearch.sources.slice(0, 12).map((source) => ({
+                  title: String(source?.title || "").slice(0, 180),
+                  url: String(source?.url || "").slice(0, 2_000),
+                }))
+              : [],
+          }
+        : null,
       createdAt: new Date().toISOString(),
     });
     conversation.updatedAt = new Date().toISOString();
@@ -532,8 +592,10 @@ async function sendMessage(rawMessage, isRetry = false) {
     retryMessage = messageText;
     retryError = error.message || "Please check your connection and try again.";
     if (error.code === "SETUP_REQUIRED") providerConfigured = false;
-    if (error.code === "FREE_TIER_LIMIT") {
-      setStatus("error", "Free Tier limit reached", "Gemini Free Tier is temporarily unavailable", retryError);
+    if (error.code === "GEMINI_GROUNDING_LIMIT" || error.code === "GEMINI_RATE_LIMIT") {
+      setStatus("error", "Search limit reached", "Google Search or Gemini limit reached", retryError);
+    } else if (error.code === "GEMINI_GROUNDING_UNAVAILABLE") {
+      setStatus("error", "Search unavailable", "Google Search grounding is not enabled for this API tier", retryError);
     } else {
       setStatus(
         providerConfigured === false ? "missing" : "error",

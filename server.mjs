@@ -8,6 +8,13 @@ import { publishableKeyFromHost } from "@clerk/shared/keys";
 import pg from "pg";
 import { createLearningCatalog, LearningInputError } from "./server/learning-catalog.mjs";
 import {materialProblem,materialsProblem} from "./server/lesson-materials.mjs";
+import {
+  monthlyGroundingRequestCap,
+  parseGeminiGrounding,
+  recordGroundingQueries,
+  reserveGroundingRequest,
+  utcMonthStart,
+} from "./server/gemini-grounding.mjs";
 import { CLERK_PROXY_PATH, clerkProxyMiddleware, getClerkProxyHost } from "./server/middlewares/clerkProxyMiddleware.mjs";
 
 const projectRoot = resolve(fileURLToPath(new URL(".", import.meta.url)));
@@ -36,7 +43,7 @@ const languageNames = {
 
 const geminiModel = "gemini-3.5-flash-lite";
 const geminiSetupMessage =
-  "Gemini is not configured. Add GEMINI_API_KEY in Replit Secrets using a Google AI Studio API key. This app uses the Gemini Free Tier model gemini-3.5-flash-lite and does not enable paid billing.";
+  "Gemini is not configured. Add GEMINI_API_KEY in Replit Secrets using a Google AI Studio API key. No API key or paid plan was changed by Mina Teach AI.";
 const setupMessage =
   "MiniMax credentials are missing. Add a MiniMax Global API key as the server-side Replit Secret MINIMAX_API_KEY.";
 
@@ -142,7 +149,7 @@ function resolveFounderResponse(language, message, history) {
   return founderProfile.responses[responseLanguage] || founderProfile.responses.en;
 }
 
-function buildTutorInstructions(language, grade) {
+function buildTutorInstructions(language, grade, searchAvailable = false, searchNotice = "") {
   const languageInstruction =
     language === "auto"
       ? "Automatically detect whether the student's latest message is in Afaan Oromoo, Amharic, or English, and answer in that same language. If the language is unclear, ask the student which language they prefer."
@@ -156,6 +163,10 @@ function buildTutorInstructions(language, grade) {
     "Explain difficult ideas in clear, numbered steps. For calculations, show the method, units, and a brief check of the answer.",
     "When the student asks to explain an English question in Afaan Oromoo, translate the question and choices into Afaan Oromoo, explain key English words, and then reason through the answer in Afaan Oromoo.",
     "When asked to create practice, write a Grade-appropriate multiple-choice question with four options, identify the correct answer, and give a concise explanation. Label generated material as practice, not as an official past exam.",
+    searchAvailable
+      ? "Google Search grounding is available. Decide whether current web information would materially improve the answer; use the Google Search tool for current facts, recent events, active policies, prices, or an explicit request to search. Do not claim you searched unless the API actually returns grounding search metadata. Use only returned source metadata for citations, compare reputable sources when useful, and state conflicts or uncertainty."
+      : `Google Search grounding is unavailable for this request. Do not claim to browse, search, or cite current sources. ${searchNotice || "Tell the student the answer was not checked against current web sources when current information matters."}`,
+    "A web-grounded response is an AI synthesis, not independent verification. Never invent source names, dates, links, or citations.",
     "Keep answers focused and reasonably concise. Do not add practice questions unless the student asks for them.",
     "Do not claim that a question comes from an official Ethiopian exam unless the student provided a verifiable source. Do not invent curriculum facts; say when you are unsure and encourage checking the student's textbook or official syllabus.",
     "Be encouraging and concise. Ask one clarifying question when the student's request is too broad to answer accurately.",
@@ -219,7 +230,7 @@ function normalizeProviderError(response, providerBody) {
   };
 }
 
-function normalizeGeminiError(response, providerBody) {
+function normalizeGeminiError(response, providerBody, groundingEnabled = false) {
   const providerStatus = String(providerBody?.error?.status || "").toUpperCase();
   const providerMessage = String(providerBody?.error?.message || "").toLowerCase();
 
@@ -231,23 +242,27 @@ function normalizeGeminiError(response, providerBody) {
     return {
       statusCode: 503,
       code: "SETUP_REQUIRED",
-      message: "Gemini rejected GEMINI_API_KEY. Replace it with a valid Google AI Studio API key in Replit Secrets; do not enable paid billing.",
+      message: "Gemini rejected GEMINI_API_KEY. Check that a valid Google AI Studio API key is saved in Replit Secrets. Mina Teach AI will not change billing settings.",
     };
   }
 
   if (response.status === 429 || providerStatus === "RESOURCE_EXHAUSTED") {
     return {
       statusCode: 429,
-      code: "FREE_TIER_LIMIT",
-      message: "Gemini Free Tier rate or quota limit has been reached. No paid billing was enabled. Try again after the free quota resets.",
+      code: groundingEnabled ? "GEMINI_GROUNDING_LIMIT" : "GEMINI_RATE_LIMIT",
+      message: groundingEnabled
+        ? "Gemini or Google Search reached an API usage limit. No answer was returned; check Google AI Studio usage and retry only after confirming your limit."
+        : "Gemini reached an API usage limit. No answer was returned; check Google AI Studio usage and try again later.",
     };
   }
 
   if (providerStatus === "PERMISSION_DENIED" || response.status === 403) {
     return {
       statusCode: 403,
-      code: "GEMINI_ACCESS_DENIED",
-      message: "Google denied access to Gemini for this key or model. Check Google AI Studio key access and Free Tier availability; this app will not enable paid billing.",
+      code: groundingEnabled ? "GEMINI_GROUNDING_UNAVAILABLE" : "GEMINI_ACCESS_DENIED",
+      message: groundingEnabled
+        ? "Google Search grounding is unavailable to this API key, project, or billing tier. No web results were used. Check Google AI Studio access; Mina Teach AI does not change billing settings."
+        : "Google denied access to Gemini for this key or model. Check Google AI Studio key and model access.",
     };
   }
 
@@ -255,7 +270,7 @@ function normalizeGeminiError(response, providerBody) {
     return {
       statusCode: 503,
       code: "GEMINI_MODEL_UNAVAILABLE",
-      message: "The configured Gemini Free Tier model is unavailable to this API key.",
+      message: "The configured Gemini model is unavailable to this API key.",
     };
   }
 
@@ -263,15 +278,17 @@ function normalizeGeminiError(response, providerBody) {
     return {
       statusCode: 503,
       code: "GEMINI_TEMPORARILY_UNAVAILABLE",
-      message: "Gemini Free Tier is temporarily unavailable. No answer was generated; try again later. Paid billing is not enabled.",
+      message: "Gemini is temporarily unavailable. No answer was generated; try again later.",
     };
   }
 
   if (response.status === 400) {
     return {
       statusCode: 502,
-      code: "GEMINI_REQUEST_REJECTED",
-      message: "Gemini rejected the request format. No answer was generated.",
+      code: groundingEnabled ? "GEMINI_GROUNDING_REJECTED" : "GEMINI_REQUEST_REJECTED",
+      message: groundingEnabled
+        ? "Gemini rejected the Google Search request. No web answer was generated; check the model's grounding access and retry."
+        : "Gemini rejected the request format. No answer was generated.",
     };
   }
 
@@ -392,6 +409,23 @@ async function handleAssistantChat(request, response) {
     return;
   }
 
+  const groundingMonth = utcMonthStart();
+  let groundingEnabled = false;
+  let searchNotice = "";
+  try {
+    groundingEnabled = await reserveGroundingRequest(
+      pool,
+      groundingMonth,
+      monthlyGroundingRequestCap,
+    );
+    if (!groundingEnabled) {
+      searchNotice = "The app's monthly web-search safeguard has been reached. No web search was run, so the answer may not reflect current information.";
+    }
+  } catch (error) {
+    console.error("[assistant] Google Search budget check failed.", { name: error?.name || "Error" });
+    searchNotice = "Web search is unavailable because its usage limit could not be confirmed. No web search was run.";
+  }
+
   const contents = [
     ...cleanHistory(input.history).map((item) => ({
       role: item.role === "assistant" ? "model" : "user",
@@ -411,9 +445,10 @@ async function handleAssistantChat(request, response) {
       },
       body: JSON.stringify({
         systemInstruction: {
-          parts: [{ text: buildTutorInstructions(language, grade) }],
+          parts: [{ text: buildTutorInstructions(language, grade, groundingEnabled, searchNotice) }],
         },
         contents,
+        ...(groundingEnabled ? { tools: [{ google_search: {} }] } : {}),
         generationConfig: {
           temperature: 0.35,
           maxOutputTokens: 768,
@@ -436,7 +471,7 @@ async function handleAssistantChat(request, response) {
         providerStatus: providerBody?.error?.status || null,
         model,
       });
-      const failure = normalizeGeminiError(providerResponse, providerBody);
+      const failure = normalizeGeminiError(providerResponse, providerBody, groundingEnabled);
       sendError(response, failure.statusCode, failure.code, failure.message);
       return;
     }
@@ -452,7 +487,8 @@ async function handleAssistantChat(request, response) {
       return;
     }
 
-    const answer = getGeminiAnswerText(providerBody);
+    const grounded = parseGeminiGrounding(providerBody);
+    const answer = grounded.answer || getGeminiAnswerText(providerBody);
     if (!answer) {
       sendError(
         response,
@@ -463,7 +499,26 @@ async function handleAssistantChat(request, response) {
       return;
     }
 
-    sendJson(response, 200, { answer });
+    if (grounded.searchQueryCount > 0) {
+      try {
+        await recordGroundingQueries(pool, groundingMonth, grounded.searchQueryCount);
+      } catch (error) {
+        console.error("[assistant] Google Search usage record failed.", { name: error?.name || "Error" });
+      }
+    }
+    sendJson(response, 200, {
+      answer,
+      webResearch: {
+        searched: grounded.searchedWeb,
+        sourceCount: grounded.sources.length,
+        sources: grounded.sources,
+        notice: grounded.searchedWeb
+          ? grounded.sources.length
+            ? "Searched the web. This is an AI summary; review the cited sources."
+            : "A web search ran, but no usable source citations were returned."
+          : searchNotice || "No web search was performed; this answer is from general model knowledge.",
+      },
+    });
   } catch (error) {
     if (error?.name === "TimeoutError" || error?.name === "AbortError") {
       sendError(
@@ -498,7 +553,10 @@ async function handleAssistantStatus(response) {
   sendJson(response, 200, {
     provider: "gemini",
     configured: true,
-    message: "Gemini API key is saved. A real chat request is required to verify access and free-tier quota.",
+    model: geminiModel,
+    googleSearchGrounding: "enabled-when-available",
+    monthlyGroundedRequestCap: monthlyGroundingRequestCap,
+    message: "Gemini API key is saved. Google Search grounding may be used when current sources would help; live model and billing-tier access is checked only during a request.",
   });
 }
 

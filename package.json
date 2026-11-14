@@ -10,10 +10,11 @@
     "test:history-browser": "node tests/learning-browser-check.mjs",
     "test:learning-browser": "node tests/learning-browser-check.mjs",
     "test:materials-browser": "node tests/materials-browser-check.mjs",
+    "test:assistant-grounding:browser": "node tests/assistant-grounding-browser-check.mjs",
     "test:navigation:desktop": "node tests/navigation-browser-check.mjs --desktop",
     "test:navigation:android": "node tests/navigation-browser-check.mjs --android",
     "audit:materials": "node scripts/audit-learning-content.mjs",
-    "test": "npm run build:account && node --check server.mjs && node --check server/learning-catalog.mjs && node --check server/lesson-materials.mjs && node --check assistant/app.js && node --check learning/app.js && node --check learning/history-grade10.js && node --input-type=module --check < learning/dashboard.js && node --input-type=module --check < learning/lesson-view.js && node --input-type=module --check < learning/learning-state.js && node --input-type=module --check < learning/material-reader.js && node --input-type=module --check < learning/coverage.js && node --check exams/app.js && node --check admin/app.js && node --test tests/*.test.mjs"
+    "test": "npm run build:account && node --check server.mjs && node --check server/gemini-grounding.mjs && node --check server/learning-catalog.mjs && node --check server/lesson-materials.mjs && node --check assistant/app.js && node --check tests/assistant-grounding-browser-check.mjs && node --check learning/app.js && node --check learning/history-grade10.js && node --input-type=module --check < learning/dashboard.js && node --input-type=module --check < learning/lesson-view.js && node --input-type=module --check < learning/learning-state.js && node --input-type=module --check < learning/material-reader.js && node --input-type=module --check < learning/coverage.js && node --check exams/app.js && node --check admin/app.js && node --test tests/*.test.mjs"
   },
   "repository": {
     "type": "git",
