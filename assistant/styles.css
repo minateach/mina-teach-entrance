@@ -842,6 +842,7 @@ a {
 
 .composer textarea {
   width: 100%;
+  min-width: 0;
   min-height: 44px;
   max-height: 140px;
   resize: vertical;
@@ -852,6 +853,109 @@ a {
   background: transparent;
   font-size: 13px;
   line-height: 1.5;
+}
+
+.image-attach-button {
+  display: inline-flex;
+  min-width: 50px;
+  height: 42px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 1px solid #d9e3ee;
+  border-radius: 12px;
+  color: #234b73;
+  background: #f4f8fc;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.image-attach-button:hover {
+  border-color: #a9c5df;
+  background: #eaf3fb;
+}
+
+.image-attach-button span:first-child {
+  font-size: 16px;
+}
+
+.image-attachment-preview {
+  display: flex;
+  min-height: 62px;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0;
+  padding: 7px 9px;
+  border: 1px solid #d9e3ee;
+  border-radius: 12px;
+  background: #f7faff;
+}
+
+.image-attachment-preview[hidden] {
+  display: none;
+}
+
+.image-attachment-preview img,
+.message-image-preview {
+  width: 64px;
+  height: 54px;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  background: #e7edf4;
+  object-fit: cover;
+}
+
+.image-attachment-name {
+  min-width: 0;
+  flex: 1;
+  color: var(--ink-muted);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.remove-image-button {
+  flex: 0 0 auto;
+  padding: 7px 9px;
+  border: 1px solid #cbd8e5;
+  border-radius: 8px;
+  color: #284c6e;
+  background: #fff;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.image-retention-note {
+  margin: 6px 0 0;
+  color: #858f94;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.message-image-preview {
+  display: block;
+  width: min(240px, 100%);
+  height: auto;
+  max-height: 280px;
+  margin-bottom: 8px;
+  object-fit: contain;
+}
+
+.message-image-unavailable {
+  margin: 0 0 8px;
+  padding: 9px 11px;
+  border: 1px dashed #cbd8e5;
+  border-radius: 10px;
+  color: var(--ink-muted);
+  background: #f6f9fc;
+  font-size: 10px;
+}
+
+.image-usage-note {
+  margin: 6px 0 0;
+  color: #818c99;
+  font-size: 9px;
 }
 
 .composer textarea::placeholder {
@@ -1203,6 +1307,23 @@ a {
 
   .composer-help {
     font-size: 9px;
+  }
+
+  .image-attach-button {
+    width: 41px;
+    min-width: 41px;
+    height: 40px;
+    flex-direction: column;
+    gap: 0;
+    padding: 2px;
+  }
+
+  .image-attach-button span:last-child {
+    font-size: 7px;
+  }
+
+  .image-retention-note {
+    font-size: 8px;
   }
 
   .message-content-wrap {

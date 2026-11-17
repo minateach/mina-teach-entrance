@@ -5,9 +5,13 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 import { clerkClient, clerkMiddleware, getAuth } from "@clerk/express";
 import { publishableKeyFromHost } from "@clerk/shared/keys";
+import { ReplitConnectors } from "@replit/connectors-sdk";
 import pg from "pg";
 import { createLearningCatalog, LearningInputError } from "./server/learning-catalog.mjs";
 import {materialProblem,materialsProblem} from "./server/lesson-materials.mjs";
+import { normalizeImageDataUrl } from "./server/image-processing.mjs";
+import { monthlyImageRequestCap, reserveImageAIRequest, recordSuccessfulImage, utcImageUsageMonth } from "./server/image-usage.mjs";
+import { handleImageStudioRequest } from "./server/image-studio.mjs";
 import {
   monthlyGroundingRequestCap,
   parseGeminiGrounding,
@@ -22,12 +26,14 @@ const founderProfile = JSON.parse(await readFile(resolve(projectRoot, "server/fo
 const port = Number(process.env.PORT || 5000);
 const host = "0.0.0.0";
 const maxBodyBytes = 20 * 1024;
+const maxImageRequestBytes = 8 * 1024 * 1024;
 const maxHistoryMessages = 10;
 const maxMessageLength = 2_000;
 const supportedGrades = new Set([9, 10, 11, 12]);
 const supportedLanguages = new Set(["auto", "en", "am", "om"]);
 const { Pool } = pg;
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const minimaxConnectors = new ReplitConnectors();
 const learningCatalog = createLearningCatalog(pool);
 const allowedRecordTypes = new Set(["conversations", "learning", "preferences"]);
 const chatRateWindows = new Map();
@@ -57,14 +63,14 @@ function getLegacyInlineHashes(html) {
 function setSecurityHeaders(response, legacyInlineHashes = null) {
   response.setHeader("X-Content-Type-Options", "nosniff");
   response.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-  response.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  response.setHeader("Permissions-Policy", "camera=(self), microphone=(), geolocation=()");
   const inlineScriptSources = legacyInlineHashes?.scripts.length ? ` ${legacyInlineHashes.scripts.join(" ")}` : "";
   const inlineHandlerSources = legacyInlineHashes?.handlers.length
     ? ` 'unsafe-hashes' ${legacyInlineHashes.handlers.join(" ")}`
     : "";
   response.setHeader(
     "Content-Security-Policy",
-    `default-src 'self'; connect-src 'self' https://*.clerk.accounts.dev https://clerk-telemetry.com https://cdn.protect.clerk.com https://*.client.protect.clerk.com; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' https://*.clerk.accounts.dev https://cdn.protect.clerk.com${inlineScriptSources}${inlineHandlerSources}; worker-src 'self' blob:; frame-src https://*.clerk.accounts.dev; font-src 'self' https://fonts.gstatic.com data:; base-uri 'self'; form-action 'self'; frame-ancestors 'self'`,
+    `default-src 'self'; connect-src 'self' https://*.clerk.accounts.dev https://clerk-telemetry.com https://cdn.protect.clerk.com https://*.client.protect.clerk.com; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' https://*.clerk.accounts.dev https://cdn.protect.clerk.com${inlineScriptSources}${inlineHandlerSources}; worker-src 'self' blob:; frame-src https://*.clerk.accounts.dev; font-src 'self' https://fonts.gstatic.com data:; base-uri 'self'; form-action 'self'; frame-ancestors 'self'`,
   );
 }
 
@@ -149,7 +155,7 @@ function resolveFounderResponse(language, message, history) {
   return founderProfile.responses[responseLanguage] || founderProfile.responses.en;
 }
 
-function buildTutorInstructions(language, grade, searchAvailable = false, searchNotice = "") {
+function buildTutorInstructions(language, grade, searchAvailable = false, searchNotice = "", imagePresent = false) {
   const languageInstruction =
     language === "auto"
       ? "Automatically detect whether the student's latest message is in Afaan Oromoo, Amharic, or English, and answer in that same language. If the language is unclear, ask the student which language they prefer."
@@ -167,6 +173,9 @@ function buildTutorInstructions(language, grade, searchAvailable = false, search
       ? "Google Search grounding is available. Decide whether current web information would materially improve the answer; use the Google Search tool for current facts, recent events, active policies, prices, or an explicit request to search. Do not claim you searched unless the API actually returns grounding search metadata. Use only returned source metadata for citations, compare reputable sources when useful, and state conflicts or uncertainty."
       : `Google Search grounding is unavailable for this request. Do not claim to browse, search, or cite current sources. ${searchNotice || "Tell the student the answer was not checked against current web sources when current information matters."}`,
     "A web-grounded response is an AI synthesis, not independent verification. Never invent source names, dates, links, or citations.",
+    imagePresent
+      ? "An image is attached. Describe only visible evidence, say when text or details are unclear, and do not infer identity, private traits, or facts not shown. For educational questions, explain the visible work step by step and ask for a clearer crop if needed."
+      : "",
     "Keep answers focused and reasonably concise. Do not add practice questions unless the student asks for them.",
     "Do not claim that a question comes from an official Ethiopian exam unless the student provided a verifiable source. Do not invent curriculum facts; say when you are unsure and encourage checking the student's textbook or official syllabus.",
     "Be encouraging and concise. Ask one clarifying question when the student's request is too broad to answer accurately.",
@@ -368,7 +377,7 @@ function consumeChatRateLimit(request) {
 async function handleAssistantChat(request, response) {
   let input;
   try {
-    input = await readJsonBody(request);
+    input = await readJsonBody(request, maxImageRequestBytes);
   } catch (error) {
     sendError(
       response,
@@ -382,7 +391,11 @@ async function handleAssistantChat(request, response) {
   const grade = Number(input?.grade);
   const language = input?.language;
   const message =
-    typeof input?.message === "string" ? input.message.trim().slice(0, maxMessageLength) : "";
+    typeof input?.message === "string"
+      ? input.message.trim().slice(0, maxMessageLength)
+      : input?.imageDataUrl
+        ? "Please describe this image and help me understand it."
+        : "";
 
   if (!supportedGrades.has(grade)) {
     sendError(response, 400, "INVALID_GRADE", "Choose Grade 9, 10, 11, or 12.");
@@ -392,12 +405,14 @@ async function handleAssistantChat(request, response) {
     sendError(response, 400, "INVALID_LANGUAGE", "Choose automatic detection, English, Amharic, or Afaan Oromoo.");
     return;
   }
-  if (!message) {
+  if (!message && !input?.imageDataUrl) {
     sendError(response, 400, "EMPTY_MESSAGE", "Type a question before sending.");
     return;
   }
 
-  const founderAnswer = resolveFounderResponse(language, message, input.history);
+  const founderAnswer = input.imageDataUrl
+    ? null
+    : resolveFounderResponse(language, message, input.history);
   if (founderAnswer) {
     sendJson(response, 200, { answer: founderAnswer, source: "persistent_app_knowledge" });
     return;
@@ -409,21 +424,60 @@ async function handleAssistantChat(request, response) {
     return;
   }
 
+  let imageInput = null;
+  if (input.imageDataUrl !== undefined) {
+    try {
+      imageInput = await normalizeImageDataUrl(input.imageDataUrl);
+    } catch (error) {
+      sendError(
+        response,
+        error.statusCode || 400,
+        error.code || "INVALID_IMAGE",
+        error.message || "Choose a valid JPG, PNG, or WEBP image.",
+      );
+      return;
+    }
+  }
+
+  const imageUsageMonth = utcImageUsageMonth();
+  if (imageInput) {
+    try {
+      const withinVisionCap = await reserveImageAIRequest(
+        pool,
+        "gemini_vision",
+        imageUsageMonth,
+        monthlyImageRequestCap,
+      );
+      if (!withinVisionCap) {
+        sendError(response, 429, "GEMINI_VISION_LIMIT", "The app's monthly image-analysis limit has been reached. No image was sent to Gemini.");
+        return;
+      }
+    } catch (error) {
+      console.error("[assistant] Image-analysis usage check failed.", { name: error?.name || "Error" });
+      sendError(response, 503, "IMAGE_USAGE_UNAVAILABLE", "Image analysis is paused because its usage limit could not be confirmed. No image was sent to Gemini.");
+      return;
+    }
+  }
+
   const groundingMonth = utcMonthStart();
   let groundingEnabled = false;
   let searchNotice = "";
-  try {
-    groundingEnabled = await reserveGroundingRequest(
-      pool,
-      groundingMonth,
-      monthlyGroundingRequestCap,
-    );
-    if (!groundingEnabled) {
-      searchNotice = "The app's monthly web-search safeguard has been reached. No web search was run, so the answer may not reflect current information.";
+  if (imageInput) {
+    searchNotice = "Google Search is not enabled for image-analysis requests.";
+  } else {
+    try {
+      groundingEnabled = await reserveGroundingRequest(
+        pool,
+        groundingMonth,
+        monthlyGroundingRequestCap,
+      );
+      if (!groundingEnabled) {
+        searchNotice = "The app's monthly web-search safeguard has been reached. No web search was run, so the answer may not reflect current information.";
+      }
+    } catch (error) {
+      console.error("[assistant] Google Search budget check failed.", { name: error?.name || "Error" });
+      searchNotice = "Web search is unavailable because its usage limit could not be confirmed. No web search was run.";
     }
-  } catch (error) {
-    console.error("[assistant] Google Search budget check failed.", { name: error?.name || "Error" });
-    searchNotice = "Web search is unavailable because its usage limit could not be confirmed. No web search was run.";
   }
 
   const contents = [
@@ -431,7 +485,13 @@ async function handleAssistantChat(request, response) {
       role: item.role === "assistant" ? "model" : "user",
       parts: [{ text: item.content }],
     })),
-    { role: "user", parts: [{ text: message }] },
+    {
+      role: "user",
+      parts: [
+        { text: message },
+        ...(imageInput ? [{ inline_data: { mime_type: imageInput.mimeType, data: imageInput.data } }] : []),
+      ],
+    },
   ];
   const model = geminiModel;
   try {
@@ -445,7 +505,7 @@ async function handleAssistantChat(request, response) {
       },
       body: JSON.stringify({
         systemInstruction: {
-          parts: [{ text: buildTutorInstructions(language, grade, groundingEnabled, searchNotice) }],
+          parts: [{ text: buildTutorInstructions(language, grade, groundingEnabled, searchNotice, Boolean(imageInput)) }],
         },
         contents,
         ...(groundingEnabled ? { tools: [{ google_search: {} }] } : {}),
@@ -506,8 +566,24 @@ async function handleAssistantChat(request, response) {
         console.error("[assistant] Google Search usage record failed.", { name: error?.name || "Error" });
       }
     }
+    if (imageInput) {
+      try {
+        await recordSuccessfulImage(pool, "gemini_vision", imageUsageMonth);
+      } catch (error) {
+        console.error("[assistant] Image-analysis usage record failed.", { name: error?.name || "Error" });
+      }
+    }
+    const usageMetadata = imageInput && providerBody?.usageMetadata && typeof providerBody.usageMetadata === "object"
+      ? {
+          inputTokens: Number(providerBody.usageMetadata.promptTokenCount) || 0,
+          outputTokens: Number(providerBody.usageMetadata.candidatesTokenCount) || 0,
+          totalTokens: Number(providerBody.usageMetadata.totalTokenCount) || 0,
+        }
+      : null;
     sendJson(response, 200, {
       answer,
+      imageAnalyzed: Boolean(imageInput),
+      ...(usageMetadata ? { imageUsage: usageMetadata } : {}),
       webResearch: {
         searched: grounded.searchedWeb,
         sourceCount: grounded.sources.length,
@@ -516,7 +592,9 @@ async function handleAssistantChat(request, response) {
           ? grounded.sources.length
             ? "Searched the web. This is an AI summary; review the cited sources."
             : "A web search ran, but no usable source citations were returned."
-          : searchNotice || "No web search was performed; this answer is from general model knowledge.",
+          : imageInput
+            ? "The uploaded image was sent for analysis. No web search was performed."
+            : searchNotice || "No web search was performed; this answer is from general model knowledge.",
       },
     });
   } catch (error) {
@@ -572,6 +650,9 @@ function publicFilePath(pathname) {
   if (pathname === "/assistant" || pathname === "/assistant/") {
     return "assistant/index.html";
   }
+  if (pathname === "/image-studio" || pathname === "/image-studio/") {
+    return "image-studio/index.html";
+  }
   if (pathname === "/learning" || pathname === "/learning/") {
     return "learning/index.html";
   }
@@ -589,6 +670,7 @@ function publicFilePath(pathname) {
   const allowedTopLevelFiles = new Set(["/Index.html", "/Index.HTml"]);
   if (allowedTopLevelFiles.has(pathname)) return pathname.slice(1);
   if (pathname.startsWith("/assistant/")) return pathname.slice(1);
+  if (pathname.startsWith("/image-studio/")) return pathname.slice(1);
   if (new Set(["/learning/app.js", "/learning/styles.css", "/learning/library.css", "/learning/history-grade10.js", "/learning/dashboard.js", "/learning/learning-state.js", "/learning/lesson-view.js", "/learning/material-reader.js", "/learning/coverage.html", "/learning/coverage.js"]).has(pathname)) {
     return pathname.slice(1);
   }
@@ -1287,6 +1369,41 @@ app.use(async (request, response) => {
 
   if (request.method === "GET" && pathname === "/api/assistant/status") {
     await handleAssistantStatus(response);
+    return;
+  }
+
+  if (pathname === "/api/image-studio/process") {
+    if (request.method !== "POST") {
+      sendError(response, 405, "METHOD_NOT_ALLOWED", "Use POST to edit or generate an image.");
+      return;
+    }
+    const origin = request.headers.origin;
+    if (origin) {
+      try {
+        if (new URL(origin).host !== request.headers.host) {
+          sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed.");
+          return;
+        }
+      } catch {
+        sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed.");
+        return;
+      }
+    }
+    const rateLimit = consumeChatRateLimit(request);
+    if (!rateLimit.allowed) {
+      response.setHeader("Retry-After", String(rateLimit.retryAfter));
+      sendError(response, 429, "RATE_LIMITED", "Too many image requests from this connection. Please wait and try again.");
+      return;
+    }
+    await handleImageStudioRequest({
+      request,
+      response,
+      pool,
+      connectors: minimaxConnectors,
+      readJsonBody,
+      sendJson,
+      sendError,
+    });
     return;
   }
 

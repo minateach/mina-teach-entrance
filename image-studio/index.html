@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#10234b">
+    <meta name="description" content="Create and transform images with MINA TEACH AI.">
+    <link rel="icon" href="/images/mina-teach-ai-favicon.png" type="image/png">
+    <title>MINA TEACH AI — Image Studio</title>
+    <link rel="stylesheet" href="./styles.css">
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <div class="studio-shell">
+      <header class="studio-header">
+        <a class="brand" href="/" aria-label="MINA TEACH AI home">
+          <img src="/images/0_1000107983_1794514022860.png" alt="" width="54" height="40">
+          <span><strong>MINA TEACH AI</strong><small>Dhaloota beekumsa omishuudha.</small></span>
+        </a>
+        <nav aria-label="Main navigation">
+          <a href="/assistant/">AI Assistant</a>
+          <a href="/learning/">Learning</a>
+          <a href="/">Home</a>
+        </nav>
+      </header>
+
+      <main>
+        <section class="hero">
+          <div class="hero-copy">
+            <p class="eyebrow">CREATE · TRANSFORM · LEARN</p>
+            <h1>AI Image Studio</h1>
+            <p>Improve a photo or create a new image with a clear instruction. Your original stays unchanged.</p>
+          </div>
+          <div class="provider-note">
+            <span class="provider-dot" aria-hidden="true"></span>
+            <span>MiniMax H3-Image · 1K output · capped usage</span>
+          </div>
+        </section>
+
+        <section class="studio-card" aria-label="Image editor">
+          <div class="mode-tabs" role="tablist" aria-label="Choose image task">
+            <button type="button" class="mode-tab active" id="editModeTab" role="tab" aria-selected="true">Edit a photo</button>
+            <button type="button" class="mode-tab" id="createModeTab" role="tab" aria-selected="false">Create an image</button>
+          </div>
+
+          <div class="editor-grid">
+            <section class="controls" aria-label="Image instructions">
+              <div id="editControls">
+                <div class="upload-actions">
+                  <button type="button" class="secondary-button" id="galleryButton">Choose photo</button>
+                  <button type="button" class="secondary-button" id="cameraButton">Take photo</button>
+                </div>
+                <input class="visually-hidden" id="galleryInput" type="file" accept="image/jpeg,image/png,image/webp">
+                <input class="visually-hidden" id="cameraInput" type="file" accept="image/jpeg,image/png,image/webp" capture="environment">
+                <p class="field-hint">JPG, PNG, or WEBP · up to 12 MB before local resizing</p>
+
+                <div class="prompt-chips" aria-label="Suggested edits">
+                  <button type="button" data-prompt="Improve image clarity, lighting, and color while preserving the main subject, details, and composition.">Improve quality</button>
+                  <button type="button" data-prompt="Replace the background with a clean, softly lit light-blue studio backdrop. Keep the main subject unchanged.">Replace background</button>
+                  <button type="button" data-prompt="Restyle this image as a detailed watercolor illustration while preserving the main subject and important details.">Watercolor style</button>
+                </div>
+              </div>
+
+              <label class="field-label" for="promptInput">Describe the change</label>
+              <textarea id="promptInput" rows="5" maxlength="1500" placeholder="For example: Replace the background with a calm library while keeping the person unchanged."></textarea>
+              <div class="prompt-meta"><span>Be specific about what should stay the same.</span><span id="promptCount">0 / 1500</span></div>
+
+              <div class="action-row">
+                <button type="button" class="primary-button" id="runButton" disabled>Generate image</button>
+                <button type="button" class="text-button" id="resetButton">Clear</button>
+              </div>
+              <p class="usage-note">AI requests may incur provider charges. The app allows up to 20 image generations or edits per UTC month. Example standard 1K MiniMax prices are about $0.02179 per generation and $0.02654 per one-image edit; prices can change. Transparent-background export is not supported by this model.</p>
+              <p class="studio-status" id="studioStatus" role="status" aria-live="polite">Choose a photo or switch to create mode.</p>
+            </section>
+
+            <section class="preview-area" aria-label="Before and after preview">
+              <div class="preview-heading">
+                <h2>Preview</h2>
+                <span id="previewState">No image selected</span>
+              </div>
+              <div class="preview-grid" id="previewGrid">
+                <figure class="preview-panel" id="sourcePanel">
+                  <figcaption>Original</figcaption>
+                  <div class="preview-frame">
+                    <img id="sourcePreview" alt="Original image preview" hidden>
+                    <p id="sourcePlaceholder">Your original image appears here.</p>
+                  </div>
+                </figure>
+                <figure class="preview-panel result-panel" id="resultPanel">
+                  <figcaption>AI result</figcaption>
+                  <div class="preview-frame">
+                    <img id="resultPreview" alt="AI-edited image preview" hidden>
+                    <p id="resultPlaceholder">Your result will appear here after editing.</p>
+                  </div>
+                </figure>
+              </div>
+              <div class="result-actions" id="resultActions" hidden>
+                <button type="button" class="secondary-button" id="downloadButton">Download image</button>
+                <button type="button" class="secondary-button" id="shareButton">Share</button>
+              </div>
+              <p class="privacy-note">Images are sent to MiniMax only when you submit an edit or generation. Uploads and results are not stored on MINA TEACH AI servers.</p>
+            </section>
+          </div>
+        </section>
+      </main>
+
+      <footer>MINA TEACH AI · Dhaloota beekumsa omishuudha.</footer>
+    </div>
+  </body>
+</html>

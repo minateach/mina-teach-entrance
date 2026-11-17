@@ -10,7 +10,7 @@
     <link rel="apple-touch-icon" href="/assistant/app-icon-180.png">
     <title>MINA TEACH AI — Study companion</title>
     <link rel="stylesheet" href="./styles.css">
-    <script src="./app.js" defer></script>
+    <script type="module" src="./app.js"></script>
   </head>
   <body>
     <div class="app-shell">
@@ -25,6 +25,7 @@
         <div class="topbar-right">
           <p class="mission" lang="om">Dhaloota beekumsa omishuudha.</p>
           <a class="home-link" href="/account/">Account</a>
+          <a class="home-link" href="/image-studio/">Image Studio</a>
           <a class="home-link" href="/">Home</a>
         </div>
       </header>
@@ -107,6 +108,14 @@
 
               <form class="composer" id="chatForm">
                 <label class="sr-only" for="messageInput">Your question for Mina Teach</label>
+                <button class="image-attach-button" id="galleryButton" type="button" aria-label="Attach an image from your gallery">
+                  <span aria-hidden="true">▧</span><span>Photo</span>
+                </button>
+                <button class="image-attach-button camera-button" id="cameraButton" type="button" aria-label="Take a photo with your camera">
+                  <span aria-hidden="true">◉</span><span>Camera</span>
+                </button>
+                <input class="sr-only" id="galleryInput" type="file" accept="image/jpeg,image/png,image/webp">
+                <input class="sr-only" id="cameraInput" type="file" accept="image/jpeg,image/png,image/webp" capture="environment">
                 <textarea id="messageInput" name="message" rows="1" placeholder="Ask a question or share what feels difficult…" autocomplete="off"></textarea>
                 <button class="send-button" id="sendButton" type="submit" aria-label="Send message" disabled>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
@@ -114,10 +123,16 @@
                   </svg>
                 </button>
               </form>
+              <div class="image-attachment-preview" id="imageAttachmentPreview" hidden>
+                <img id="imageAttachmentThumbnail" alt="Selected image preview">
+                <span class="image-attachment-name" id="imageAttachmentName"></span>
+                <button class="remove-image-button" id="removeSelectedImage" type="button" aria-label="Remove selected image">Remove</button>
+              </div>
               <div class="composer-help">
                 <span>Enter to send · Shift + Enter for a new line</span>
                 <span>Current web sources are checked when useful; grounded requests are capped at 100 per app month and may incur Google API charges.</span>
               </div>
+              <p class="image-retention-note">Images stay in this browser and are sent to Gemini only when you submit them. Gemini vision is capped at 20 app requests per UTC month and is billed by input tokens. Synced chats on another device need the image re-uploaded.</p>
             </div>
           </div>
         </section>

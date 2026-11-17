@@ -1,3 +1,5 @@
+import { getLocalImage, saveLocalImage } from "./image-store.js";
+
 const STORAGE_KEY = "mina-teach.assistant.conversations.v1";
 let storageAvailable = true;
 
@@ -8,6 +10,14 @@ const elements = {
   chatForm: document.getElementById("chatForm"),
   messageInput: document.getElementById("messageInput"),
   sendButton: document.getElementById("sendButton"),
+  galleryButton: document.getElementById("galleryButton"),
+  cameraButton: document.getElementById("cameraButton"),
+  galleryInput: document.getElementById("galleryInput"),
+  cameraInput: document.getElementById("cameraInput"),
+  attachmentPreview: document.getElementById("imageAttachmentPreview"),
+  attachmentThumbnail: document.getElementById("imageAttachmentThumbnail"),
+  attachmentName: document.getElementById("imageAttachmentName"),
+  removeSelectedImage: document.getElementById("removeSelectedImage"),
   gradeSelect: document.getElementById("gradeSelect"),
   languageSelect: document.getElementById("languageSelect"),
   statusPill: document.getElementById("statusPill"),
@@ -26,6 +36,8 @@ let retryMessage = "";
 let retryError = "";
 let providerConfigured = null;
 let accountSyncEnabled = false;
+let selectedImage = null;
+const messageImageUrls = new Set();
 
 function readConversations() {
   try {
@@ -189,6 +201,92 @@ function renderStorageNote() {
   note.setAttribute("role", storageAvailable ? "note" : "alert");
 }
 
+async function prepareImageFile(file) {
+  if (!file || !["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+    throw new Error("Choose a JPG, PNG, or WEBP image.");
+  }
+  if (file.size > 12 * 1024 * 1024) {
+    throw new Error("Choose an image smaller than 12 MB; it will be resized before upload.");
+  }
+  if (typeof createImageBitmap !== "function") {
+    if (file.size > 5 * 1024 * 1024) throw new Error("This browser cannot resize the image. Choose one under 5 MB.");
+    return file;
+  }
+
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+    if (
+      bitmap.width < 16 ||
+      bitmap.height < 16 ||
+      bitmap.width > 50_000 ||
+      bitmap.height > 50_000 ||
+      bitmap.width * bitmap.height > 50_000_000
+    ) {
+      throw new Error("This image has unsupported dimensions. Choose a smaller image.");
+    }
+    const scale = Math.min(1, 2_048 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext("2d", { alpha: false });
+    if (!context) throw new Error("This browser cannot prepare the image.");
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (result) => result ? resolve(result) : reject(new Error("The image could not be prepared.")),
+        "image/jpeg",
+        0.86,
+      );
+    });
+    const safeName = `${String(file.name || "image").replace(/\.[^.]*$/, "").slice(0, 100) || "image"}.jpg`;
+    return new File([blob], safeName, { type: "image/jpeg", lastModified: Date.now() });
+  } finally {
+    bitmap?.close?.();
+  }
+}
+
+function clearSelectedImage() {
+  if (selectedImage?.previewUrl) URL.revokeObjectURL(selectedImage.previewUrl);
+  selectedImage = null;
+  elements.galleryInput.value = "";
+  elements.cameraInput.value = "";
+  elements.attachmentPreview.hidden = true;
+  elements.attachmentThumbnail.removeAttribute("src");
+  elements.attachmentName.textContent = "";
+  updateSendButton();
+}
+
+async function selectImageFile(file) {
+  try {
+    const prepared = await prepareImageFile(file);
+    if (selectedImage?.previewUrl) URL.revokeObjectURL(selectedImage.previewUrl);
+    selectedImage = {
+      file: prepared,
+      name: prepared.name || "image.jpg",
+      previewUrl: URL.createObjectURL(prepared),
+    };
+    elements.attachmentThumbnail.src = selectedImage.previewUrl;
+    elements.attachmentName.textContent = `${selectedImage.name} · ${(prepared.size / (1024 * 1024)).toFixed(1)} MB`;
+    elements.attachmentPreview.hidden = false;
+    updateSendButton();
+    elements.messageInput.focus();
+  } catch (error) {
+    setStatus("error", "Image not attached", "Could not prepare this image", error.message || "Choose a smaller JPG, PNG, or WEBP image.");
+  }
+}
+
+function readBlobAsDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => typeof reader.result === "string"
+      ? resolve(reader.result)
+      : reject(new Error("The image could not be prepared for analysis."));
+    reader.onerror = () => reject(new Error("The image could not be read from this device."));
+    reader.readAsDataURL(blob);
+  });
+}
+
 function createMessageNode(message) {
   const wrapper = document.createElement("article");
   wrapper.className = `message ${message.role}`;
@@ -209,6 +307,36 @@ function createMessageNode(message) {
   const content = document.createElement("div");
   content.className = "message-content";
   content.textContent = message.content;
+
+  contentWrap.append(author);
+  const attachmentId = message.role === "user" &&
+    typeof message.imageAttachmentId === "string" &&
+    message.imageAttachmentId.length <= 100
+    ? message.imageAttachmentId
+    : "";
+  if (attachmentId) {
+    const unavailable = document.createElement("p");
+    unavailable.className = "message-image-unavailable";
+    unavailable.textContent = "Loading the image saved on this device…";
+    contentWrap.append(unavailable);
+    void getLocalImage(attachmentId).then((stored) => {
+      if (!wrapper.isConnected) return;
+      if (!stored?.blob) {
+        unavailable.textContent = "This image is not available on this device. Re-upload it to ask another question.";
+        return;
+      }
+      const image = document.createElement("img");
+      image.className = "message-image-preview";
+      image.alt = "Image attached to your question";
+      const url = URL.createObjectURL(stored.blob);
+      messageImageUrls.add(url);
+      image.src = url;
+      unavailable.remove();
+      contentWrap.insertBefore(image, content);
+    }).catch(() => {
+      if (wrapper.isConnected) unavailable.textContent = "This image could not be loaded from this device.";
+    });
+  }
 
   let researchInfo = null;
   if (message.role === "assistant" && message.webResearch && typeof message.webResearch === "object") {
@@ -263,7 +391,18 @@ function createMessageNode(message) {
     ? ""
     : new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(date);
 
-  contentWrap.append(author, content);
+  contentWrap.append(content);
+  if (
+    message.role === "assistant" &&
+    message.imageUsage &&
+    Number.isFinite(message.imageUsage.inputTokens) &&
+    Number.isFinite(message.imageUsage.outputTokens)
+  ) {
+    const usageNote = document.createElement("p");
+    usageNote.className = "image-usage-note";
+    usageNote.textContent = `Gemini image request · ${message.imageUsage.inputTokens} input tokens · ${message.imageUsage.outputTokens} output tokens`;
+    contentWrap.append(usageNote);
+  }
   if (researchInfo) contentWrap.append(researchInfo);
   contentWrap.append(time);
   wrapper.append(mark, contentWrap);
@@ -271,6 +410,8 @@ function createMessageNode(message) {
 }
 
 function renderConversation() {
+  for (const url of messageImageUrls) URL.revokeObjectURL(url);
+  messageImageUrls.clear();
   elements.conversationScroll.replaceChildren();
   const conversation = getActiveConversation();
   if (!conversation || conversation.messages.length === 0) {
@@ -475,8 +616,16 @@ async function checkAssistantStatus() {
 
 function updateSendButton() {
   const hasText = elements.messageInput.value.trim().length > 0;
-  elements.sendButton.disabled = isLoading || !hasText || providerConfigured === false;
-  elements.sendButton.setAttribute("aria-label", isLoading ? "Waiting for tutor response" : "Send message");
+  const hasImage = Boolean(selectedImage);
+  elements.sendButton.disabled = isLoading || (!hasText && !hasImage) || providerConfigured === false;
+  elements.sendButton.setAttribute(
+    "aria-label",
+    isLoading
+      ? "Waiting for tutor response"
+      : hasImage
+        ? hasText ? "Send question with image" : "Send image for analysis"
+        : "Send message",
+  );
 }
 
 function updateConversationTitle(conversation, firstMessage) {
@@ -487,8 +636,9 @@ function updateConversationTitle(conversation, firstMessage) {
 }
 
 async function sendMessage(rawMessage, isRetry = false) {
-  const messageText = rawMessage.trim();
-  if (!messageText || isLoading) return;
+  const typedMessage = String(rawMessage || "").trim();
+  if ((!typedMessage && !selectedImage && !isRetry) || isLoading) return;
+  const messageText = typedMessage || "Describe this image and help me understand any text, diagram, or schoolwork in it.";
   if (providerConfigured === false) {
     elements.statusBanner.dataset.visible = "true";
     elements.statusBanner.setAttribute("role", "alert");
@@ -511,11 +661,49 @@ async function sendMessage(rawMessage, isRetry = false) {
   }
 
   const priorMessages = conversation.messages.slice();
+  const priorImageMessage = priorMessages.slice().reverse().find(
+    (message) => message.role === "user" && typeof message.imageAttachmentId === "string",
+  );
+  let imageAttachmentId = selectedImage ? makeId() : priorImageMessage?.imageAttachmentId || null;
+  let imageDataUrl = null;
+  if (selectedImage) {
+    try {
+      await saveLocalImage(imageAttachmentId, selectedImage.file, selectedImage.name);
+    } catch (error) {
+      setStatus(
+        "error",
+        "Image not saved",
+        "Could not save the attachment on this device",
+        error.message || "Check browser storage and try again.",
+      );
+      return;
+    }
+  }
+  if (imageAttachmentId) {
+    try {
+      const stored = await getLocalImage(imageAttachmentId);
+      if (!stored?.blob) {
+        setStatus(
+          "error",
+          "Image unavailable",
+          "This image is not on this device",
+          "Re-upload the image before asking another question about it.",
+        );
+        return;
+      }
+      imageDataUrl = await readBlobAsDataUrl(stored.blob);
+    } catch (error) {
+      setStatus("error", "Image unavailable", "Could not read the saved image", error.message || "Re-upload the image and try again.");
+      return;
+    }
+  }
+
   if (!isRetry) {
     const userMessage = {
       id: makeId(),
       role: "user",
       content: messageText,
+      ...(selectedImage ? { imageAttachmentId } : {}),
       createdAt: new Date().toISOString(),
     };
     conversation.messages.push(userMessage);
@@ -526,6 +714,7 @@ async function sendMessage(rawMessage, isRetry = false) {
     retryMessage = "";
     retryError = "";
   }
+  if (selectedImage) clearSelectedImage();
 
   conversation.grade = Number(elements.gradeSelect.value);
   conversation.language = elements.languageSelect.value;
@@ -554,6 +743,7 @@ async function sendMessage(rawMessage, isRetry = false) {
         language: conversation.language,
         message: isRetry ? messageText : messageText,
         history,
+        ...(imageDataUrl ? { imageDataUrl } : {}),
       }),
     });
     const result = await response.json();
@@ -569,6 +759,12 @@ async function sendMessage(rawMessage, isRetry = false) {
       id: makeId(),
       role: "assistant",
       content: result.answer,
+      imageUsage: result.imageUsage && typeof result.imageUsage === "object"
+        ? {
+            inputTokens: Number(result.imageUsage.inputTokens) || 0,
+            outputTokens: Number(result.imageUsage.outputTokens) || 0,
+          }
+        : null,
       webResearch: result.webResearch && typeof result.webResearch === "object"
         ? {
             searched: result.webResearch.searched === true,
@@ -594,8 +790,12 @@ async function sendMessage(rawMessage, isRetry = false) {
     if (error.code === "SETUP_REQUIRED") providerConfigured = false;
     if (error.code === "GEMINI_GROUNDING_LIMIT" || error.code === "GEMINI_RATE_LIMIT") {
       setStatus("error", "Search limit reached", "Google Search or Gemini limit reached", retryError);
+    } else if (error.code === "GEMINI_VISION_LIMIT") {
+      setStatus("error", "Image limit reached", "Monthly Gemini image-analysis limit reached", retryError);
     } else if (error.code === "GEMINI_GROUNDING_UNAVAILABLE") {
       setStatus("error", "Search unavailable", "Google Search grounding is not enabled for this API tier", retryError);
+    } else if (error.code === "IMAGE_USAGE_UNAVAILABLE") {
+      setStatus("error", "Image analysis paused", "Usage safeguards could not be confirmed", retryError);
     } else {
       setStatus(
         providerConfigured === false ? "missing" : "error",
@@ -648,6 +848,17 @@ function closeMobileSidebar() {
 
 elements.newConversation.addEventListener("click", createConversation);
 document.getElementById("newConversationAlt").addEventListener("click", createConversation);
+elements.galleryButton.addEventListener("click", () => elements.galleryInput.click());
+elements.cameraButton.addEventListener("click", () => elements.cameraInput.click());
+elements.galleryInput.addEventListener("change", () => {
+  const file = elements.galleryInput.files?.[0];
+  if (file) void selectImageFile(file);
+});
+elements.cameraInput.addEventListener("change", () => {
+  const file = elements.cameraInput.files?.[0];
+  if (file) void selectImageFile(file);
+});
+elements.removeSelectedImage.addEventListener("click", clearSelectedImage);
 elements.chatForm.addEventListener("submit", (event) => {
   event.preventDefault();
   sendMessage(elements.messageInput.value);
