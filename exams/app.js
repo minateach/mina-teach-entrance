@@ -364,7 +364,7 @@
       $("resume-notice").hidden=true;answers={};position=0;remainingByQuestion={};deadlinesByQuestion={};correctByQuestion={};practiceFeedback={};submitting=false;transitioning=false;
       clearSavedAttempt();$("submit-exam").disabled=false;$("setup").hidden=true;$("exam").hidden=false;renderQuestion();saveAttemptState();
     }
-    catch(e){$("bank-status").textContent=e.status===401?"Sign in before starting an online exam.":e.message;}
+    catch(e){$("bank-status").textContent=e.status===401?"Sign in before starting an exam.":e.message;}
     finally {
       starting=false;controls.forEach((control,index)=>{control.disabled=disabled[index];});
       const required=$("mode").value==="entrance"?60:Number($("question-count").value);

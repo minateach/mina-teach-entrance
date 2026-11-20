@@ -1,10 +1,12 @@
 import {
   getOfflineOwner,
+  getOfflineBookmarks,
   getOfflineQuestionSet,
   listOfflineDownloads,
   listOfflineExamResults,
   removeOfflineDownload,
   saveOfflineExamResult,
+  saveOfflineBookmarks,
   saveOfflineQuestionSet,
   setOfflineOwner,
   offlineDraftKey,
@@ -20,11 +22,13 @@ try {
 }
 
 const ownerKey = () => `minaTeach.exam.bookmarks.v1:${encodeURIComponent(getOfflineOwner())}`;
+let bookmarkMemory = [];
 function readBookmarks() {
   try {
     const value = JSON.parse(localStorage.getItem(ownerKey()) || "[]");
-    return Array.isArray(value) ? value : [];
-  } catch { return []; }
+    if(Array.isArray(value)){bookmarkMemory=value;return value;}
+  } catch {}
+  return bookmarkMemory;
 }
 function toggleBookmark(question) {
   const bookmarks = readBookmarks();
@@ -36,9 +40,16 @@ function toggleBookmark(question) {
     choices: question.choices, correctIndex: question.correctIndex, explanation: question.explanation,
     sourceLabel: question.sourceLabel, savedAt: new Date().toISOString(),
   });
-  localStorage.setItem(ownerKey(), JSON.stringify(bookmarks));
+  bookmarkMemory=bookmarks;
+  try { localStorage.setItem(ownerKey(), JSON.stringify(bookmarks)); } catch {}
+  void saveOfflineBookmarks(bookmarks).catch(()=>{});
   return index < 0;
 }
+
+const localBookmarks=readBookmarks(),backupBookmarks=await getOfflineBookmarks().catch(()=>[]);
+bookmarkMemory=[...new Map([...backupBookmarks,...localBookmarks].map(item=>[String(item.id),item])).values()];
+try { localStorage.setItem(ownerKey(),JSON.stringify(bookmarkMemory)); } catch {}
+void saveOfflineBookmarks(bookmarkMemory).catch(()=>{});
 
 window.MinaOffline = {
   getOfflineOwner,
@@ -47,6 +58,7 @@ window.MinaOffline = {
   listOfflineExamResults,
   removeOfflineDownload,
   saveOfflineExamResult,
+  saveOfflineBookmarks,
   saveOfflineQuestionSet,
   offlineDraftKey,
   readBookmarks,

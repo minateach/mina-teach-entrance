@@ -1,11 +1,11 @@
-import {cachedApiResponse,getOfflineOwner,listOfflineExamResults,setOfflineOwner} from "./offline-store.js";
+import {cachedApiResponse,getOfflineLearningState,getOfflineOwner,listOfflineExamResults,saveOfflineLearningState,setOfflineOwner} from "./offline-store.js";
 
 export const STORAGE_KEY = "minaTeach.learning.v1";
 export async function api(url, options={}) {
   const method=String(options.method || "GET").toUpperCase();
   let response;
   try {
-    response=await fetch(url,{credentials:"same-origin",...options,headers:{"Content-Type":"application/json",...options.headers}});
+    response=await fetch(url,{credentials:"same-origin",cache:"no-store",...options,headers:{"Content-Type":"application/json",...options.headers}});
   } catch(error) {
     if(method==="GET") {
       try {
@@ -13,6 +13,11 @@ export async function api(url, options={}) {
         const cached=await cachedApiResponse(target.pathname+target.search);
         if(cached!==null)return cached;
       } catch {}
+      if(typeof navigator!=="undefined" && !navigator.onLine) {
+        throw new Error("This lesson or course has not been downloaded on this device. Reconnect and use Download for offline first.");
+      }
+    } else if(typeof navigator!=="undefined" && !navigator.onLine) {
+      throw new Error("This account action needs internet. Your local learning changes remain saved on this device.");
     }
     throw error;
   }
@@ -91,11 +96,21 @@ export function createStore(statusChanged=()=>{}) {
     catch { statusChanged("Stored learning data could not be read. Existing browser data has not been deleted."); return normalizeState(); }
   }
   function localSave() {
+    const owner=signedIn&&identity?`account:${identity}`:"guest";
     try {
       const drafts=JSON.parse(localStorage.getItem(key)||"{}")._lessonPracticeDrafts;
-      localStorage.setItem(key,JSON.stringify({...state,...(drafts?{_lessonPracticeDrafts:drafts}:{})})); return true;
+      localStorage.setItem(key,JSON.stringify({...state,...(drafts?{_lessonPracticeDrafts:drafts}:{})}));
+      void saveOfflineLearningState(state,owner).catch(()=>
+        statusChanged("Learning progress remains in browser storage, but its IndexedDB backup could not be updated."));
+      return true;
     }
-    catch { statusChanged("Browser storage is unavailable or full. Changes may be lost on reload. Download your data from Account or free storage."); return false; }
+    catch {
+      statusChanged("Browser storage is unavailable or full. Trying the IndexedDB backup.");
+      void saveOfflineLearningState(state,owner).then(()=>
+        statusChanged("Learning progress was saved in IndexedDB, but browser local storage is unavailable or full."))
+        .catch(()=>statusChanged("Browser storage is unavailable or full. Changes may be lost on reload."));
+      return false;
+    }
   }
   function sync() {
     if (!signedIn || !readyForSync) return queue;
@@ -160,8 +175,10 @@ export function createStore(statusChanged=()=>{}) {
         const status=await api("/api/account/status");
         signedIn=status.signedIn;
         if(!signedIn) {
-          setOfflineOwner("guest");identityConfirmed=true;state=read(STORAGE_KEY);
-          if(await attachOfflineResults("guest"))localSave();
+          setOfflineOwner("guest");identityConfirmed=true;
+          const cached=read(STORAGE_KEY),mirror=await getOfflineLearningState("guest").catch(()=>null);
+          state=mirror?mergeLearning(mirror,cached):cached;
+          await attachOfflineResults("guest");localSave();
           statusChanged("Learning is saved on this device. Sign in to use your private account data."); return;
         }
         if(!status.userId) throw new Error("Your account identity could not be confirmed. Please reload.");
@@ -169,7 +186,8 @@ export function createStore(statusChanged=()=>{}) {
         setOfflineOwner(`account:${identity}`);
         identityConfirmed=true;
         key=`${STORAGE_KEY}:account:${status.userId}`;
-        const cached=read(key); state=cached;
+        const local=read(key),mirror=await getOfflineLearningState(`account:${identity}`).catch(()=>null);
+        const cached=mirror?mergeLearning(mirror,local):local; state=cached;
         const data=await api("/api/account/data");
         // Guest data is only imported through the existing explicit Account import flow.
         state=cached._pendingSync?mergeLearning(data.records?.learning,cached):normalizeState(data.records?.learning);
@@ -194,10 +212,15 @@ export function createStore(statusChanged=()=>{}) {
         const owner=getOfflineOwner();
         if(owner.startsWith("account:")) {
           identity=owner.slice("account:".length);signedIn=true;key=`${STORAGE_KEY}:account:${identity}`;state=read(key);
+          const mirror=await getOfflineLearningState(owner).catch(()=>null);
+          if(mirror)state=mergeLearning(mirror,state);
           identityConfirmed=true;
-          statusChanged("Offline mode: saved account progress is available on this device. Changes will sync only after your account is confirmed online.");
+          localSave();
+          statusChanged(`Offline mode: saved account progress is available on this device. ${error.message} Account data will sync after your account is confirmed online.`);
         } else {
-          signedIn=false;key=STORAGE_KEY;state=read(STORAGE_KEY);identityConfirmed=true;
+          signedIn=false;key=STORAGE_KEY;
+          const local=read(STORAGE_KEY),mirror=await getOfflineLearningState("guest").catch(()=>null);
+          state=mirror?mergeLearning(mirror,local):local;identityConfirmed=true;localSave();
           statusChanged("Offline mode: guest learning progress and downloaded lessons are available on this device. Account data and sync require internet.");
         }
       }

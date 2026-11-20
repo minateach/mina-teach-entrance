@@ -1,4 +1,4 @@
-const CACHE_NAME = "mina-teach-shell-v1";
+const CACHE_NAME = "mina-teach-shell-v4";
 const SHELL = [
   "/offline.html",
   "/",
@@ -11,6 +11,8 @@ const SHELL = [
   "/learning/learning-state.js",
   "/learning/material-reader.js",
   "/learning/offline-store.js",
+  "/learning/coverage.html",
+  "/learning/coverage.js",
   "/exams/",
   "/exams/styles.css",
   "/exams/app.js",
@@ -18,6 +20,7 @@ const SHELL = [
   "/assistant/",
   "/assistant/styles.css",
   "/assistant/app.js",
+  "/assistant/offline-ai-provider.js",
   "/assistant/image-store.js",
   "/image-studio/",
   "/image-studio/styles.css",
@@ -38,7 +41,9 @@ self.addEventListener("install", event => {
 
 self.addEventListener("activate", event => {
   event.waitUntil((async () => {
-    for (const name of await caches.keys()) if (name !== CACHE_NAME) await caches.delete(name);
+    for (const name of await caches.keys()) {
+      if (name.startsWith("mina-teach-shell-") && name !== CACHE_NAME) await caches.delete(name);
+    }
     await self.clients.claim();
   })());
 });

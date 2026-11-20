@@ -2,11 +2,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 
-const stateSource=readFileSync(new URL("../learning/learning-state.js",import.meta.url),"utf8");
+const stateSource=readFileSync(new URL("../learning/learning-state.js",import.meta.url),"utf8")
+  .replace('import {cachedApiResponse,getOfflineLearningState,getOfflineOwner,listOfflineExamResults,saveOfflineLearningState,setOfflineOwner} from "./offline-store.js";',
+    'const cachedApiResponse=async()=>null;const getOfflineLearningState=async()=>null;const getOfflineOwner=()=>"guest";const saveOfflineLearningState=async()=>({});const setOfflineOwner=()=>{};const listOfflineExamResults=async()=>[];');
 const stateUrl=`data:text/javascript;base64,${Buffer.from(stateSource).toString("base64")}`;
 const materialSource=readFileSync(new URL("../learning/material-reader.js",import.meta.url),"utf8").replace('"./learning-state.js"',JSON.stringify(stateUrl));
 const materialUrl=`data:text/javascript;base64,${Buffer.from(materialSource).toString("base64")}`;
-const viewSource=readFileSync(new URL("../learning/lesson-view.js",import.meta.url),"utf8").replace('"./learning-state.js"',JSON.stringify(stateUrl)).replace('"./material-reader.js"',JSON.stringify(materialUrl));
+const viewSource=readFileSync(new URL("../learning/lesson-view.js",import.meta.url),"utf8")
+  .replace('"./learning-state.js"',JSON.stringify(stateUrl))
+  .replace('"./material-reader.js"',JSON.stringify(materialUrl))
+  .replace('import {getOfflineDownload,makeOfflineLessonDownload,removeOfflineDownload} from "./offline-store.js";',
+    'const getOfflineDownload=async()=>null;const makeOfflineLessonDownload=async()=>{};const removeOfflineDownload=async()=>{};');
 const {practiceUrl,topicParams}=await import(`data:text/javascript;base64,${Buffer.from(viewSource).toString("base64")}`);
 
 test("practice links use the subject or actual available bank stream, not an unrelated dashboard preference",()=>{

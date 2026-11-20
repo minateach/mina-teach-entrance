@@ -8,7 +8,9 @@ import {createLearningCatalog,databaseSummary} from "../server/learning-catalog.
 import {historyAnswers} from "../server/history-grade10-answers.mjs";
 import history from "../learning/history-grade10.js";
 
-const state=readFileSync(new URL("../learning/learning-state.js",import.meta.url),"utf8");
+const state=readFileSync(new URL("../learning/learning-state.js",import.meta.url),"utf8")
+  .replace('import {cachedApiResponse,getOfflineLearningState,getOfflineOwner,listOfflineExamResults,saveOfflineLearningState,setOfflineOwner} from "./offline-store.js";',
+    'const cachedApiResponse=async()=>null;const getOfflineLearningState=async()=>null;const getOfflineOwner=()=>"guest";const saveOfflineLearningState=async()=>({});const setOfflineOwner=()=>{};const listOfflineExamResults=async()=>[];');
 const stateUrl=`data:text/javascript;base64,${Buffer.from(state).toString("base64")}`;
 const reader=readFileSync(new URL("../learning/material-reader.js",import.meta.url),"utf8").replace('"./learning-state.js"',JSON.stringify(stateUrl));
 const {textParts}=await import(`data:text/javascript;base64,${Buffer.from(reader).toString("base64")}`);

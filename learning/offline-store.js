@@ -35,6 +35,15 @@ function requestResult(request) {
   });
 }
 
+function blobAsDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
+    reader.onerror = () => reject(reader.error || new Error("This image could not be prepared for offline use."));
+    reader.readAsDataURL(blob);
+  });
+}
+
 function safeOwner(value) {
   return typeof value === "string" && /^account:[A-Za-z0-9_-]{4,100}$/.test(value) ? value : "guest";
 }
@@ -63,7 +72,7 @@ async function allRecords(db) {
 }
 
 export async function saveOfflineDownload({ owner = getOfflineOwner(), key, type, title, responses = {}, data = null }) {
-  if (typeof key !== "string" || !key || !["lesson", "question-set", "exam-result"].includes(type)) {
+  if (typeof key !== "string" || !key || !["lesson", "question-set", "exam-result", "learning-state", "bookmarks"].includes(type)) {
     throw new Error("This offline download is not valid.");
   }
   const normalizedOwner = safeOwner(owner);
@@ -105,7 +114,7 @@ export async function listOfflineDownloads(owner = getOfflineOwner()) {
   const db = await database();
   try {
     return (await allRecords(db))
-      .filter(record => record.owner === safeOwner(owner))
+      .filter(record => record.owner === safeOwner(owner) && !["learning-state", "bookmarks"].includes(record.type))
       .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
       .map(({ key, owner: _owner, resourceKey, type, title, bytes, createdAt, updatedAt, data }) =>
         ({ key, resourceKey, type, title, bytes, createdAt, updatedAt, data }));
@@ -137,6 +146,36 @@ export async function clearOfflineOwner(owner) {
   } finally {
     db.close();
   }
+}
+
+export async function saveOfflineLearningState(state, owner = getOfflineOwner()) {
+  const snapshot = JSON.parse(JSON.stringify(state || {}));
+  return saveOfflineDownload({
+    owner, key: "learning-state:v1", type: "learning-state",
+    title: "Local learning progress and preferences",
+    data: { state: snapshot },
+  });
+}
+
+export async function getOfflineLearningState(owner = getOfflineOwner()) {
+  const record = await getOfflineDownload("learning-state:v1", owner);
+  return record?.type === "learning-state" && record.data?.state && typeof record.data.state === "object"
+    ? record.data.state
+    : null;
+}
+
+export async function saveOfflineBookmarks(bookmarks, owner = getOfflineOwner()) {
+  if (!Array.isArray(bookmarks)) throw new Error("Offline bookmarks must be a list.");
+  return saveOfflineDownload({
+    owner, key: "exam-bookmarks:v1", type: "bookmarks",
+    title: "Saved exam questions",
+    data: { bookmarks: bookmarks.filter(item => item && typeof item.id === "string").slice(0, 500) },
+  });
+}
+
+export async function getOfflineBookmarks(owner = getOfflineOwner()) {
+  const record = await getOfflineDownload("exam-bookmarks:v1", owner);
+  return record?.type === "bookmarks" && Array.isArray(record.data?.bookmarks) ? record.data.bookmarks : [];
 }
 
 export async function cachedApiResponse(path, owner = getOfflineOwner()) {
@@ -174,6 +213,7 @@ export async function makeOfflineLessonDownload({ id, grade, subject, language =
     `/api/learning/content/${encodeURIComponent(id)}`,
   ];
   const responses = {};
+  const missingAssets = [];
   async function load(path) {
     const response = await fetch(path, { credentials: "same-origin", cache: "no-store" });
     if (!response.ok) {
@@ -198,6 +238,24 @@ export async function makeOfflineLessonDownload({ id, grade, subject, language =
     if (page.total !== outline.length || page.materials?.length !== 1 || page.materials[0].id !== outline[offset].id) {
       throw new Error("The lesson’s materials changed during download. No partial download was saved.");
     }
+    const material = page.materials[0];
+    if (material.type === "diagram" && typeof material.url === "string") {
+      try {
+        const assetUrl = new URL(material.url, location.origin);
+        const asset = await fetch(assetUrl.href, { credentials: "omit", mode: "cors", cache: "no-store" });
+        const blob = await asset.blob();
+        if (!asset.ok || !blob.type.startsWith("image/") || blob.size > 4 * 1024 * 1024) {
+          throw new Error("The diagram is unavailable or exceeds the offline image limit.");
+        }
+        material.offlineImageDataUrl = await blobAsDataUrl(blob);
+        if (!material.offlineImageDataUrl) throw new Error("The diagram could not be embedded.");
+      } catch {
+        missingAssets.push(material.title || material.id);
+      }
+    }
+    if (material.type === "resource" && /^https?:/i.test(material.url || "")) {
+      missingAssets.push(material.title || material.id);
+    }
   }
   if (!course.chapters?.some(chapter => chapter.lessons?.some(item => item.id === id))) {
     throw new Error("The lesson is not present in the selected course outline.");
@@ -205,7 +263,7 @@ export async function makeOfflineLessonDownload({ id, grade, subject, language =
   const key = `lesson:${grade}:${language}:${id}`;
   return saveOfflineDownload({
     owner, key, type: "lesson", title: `Grade ${grade} · ${subject} · ${lesson.title}`,
-    responses, data: { id, grade: Number(grade), subject, language, title: lesson.title },
+    responses, data: { id, grade: Number(grade), subject, language, title: lesson.title, missingAssets },
   });
 }
 

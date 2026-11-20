@@ -80,7 +80,8 @@ export function renderLesson({root,lesson,course,store,changed}) {
     download.disabled=true;offlineStatus.textContent="Downloading the complete lesson and its available topic materials…";
     try {
       const record=await makeOfflineLessonDownload({id:lesson.id,grade:lesson.grade,subject:lesson.subject,language:lesson.language});
-      offlineStatus.textContent=`Available offline · ${(record.bytes/1024/1024).toFixed(1)} MB stored on this device.`;
+      const missing=record.data?.missingAssets || [];
+      offlineStatus.textContent=`Available offline · ${(record.bytes/1024/1024).toFixed(1)} MB stored on this device.${missing.length?` These linked resources still need internet: ${missing.join(", ")}.`:" All available diagrams were included."}`;
       download.textContent="Downloaded for offline ✓";removeDownload.hidden=false;
       window.dispatchEvent(new Event("mina:offline-change"));
     } catch(error) {offlineStatus.textContent=error.message;}
@@ -94,7 +95,7 @@ export function renderLesson({root,lesson,course,store,changed}) {
   });
   removeDownload.hidden=true;
   getOfflineDownload(downloadKey).then(record=>{
-    if(record){download.textContent="Downloaded for offline ✓";offlineStatus.textContent=`Available offline · ${(record.bytes/1024/1024).toFixed(1)} MB stored on this device.`;removeDownload.hidden=false;}
+    if(record){download.textContent="Downloaded for offline ✓";const missing=record.data?.missingAssets || [];offlineStatus.textContent=`Available offline · ${(record.bytes/1024/1024).toFixed(1)} MB stored on this device.${missing.length?` Some linked resources still need internet: ${missing.join(", ")}.`:" All available diagrams were included."}`;removeDownload.hidden=false;}
   }).catch(error=>{offlineStatus.textContent=error.message;});
   const practice=makeButton("Start practice",async()=>{
     practice.disabled=true;

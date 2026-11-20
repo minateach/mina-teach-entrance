@@ -51,6 +51,7 @@ try {
   }
   console.log(`PASS: audited every currently registered English-content topic: ${auditedTopics} topics across ${checkedLessons.size} accessible lessons. This excludes unimported textbook material.`);
   await navigate("/learning/coverage.html",'document.querySelectorAll("#audit-courses tr").length===72');
+  await waitFor("navigator.serviceWorker?.controller");
   assert.equal(await evaluate("document.documentElement.scrollWidth<=innerWidth"),true);
   await evaluate('[...document.querySelectorAll("#audit-courses tr")].find(row=>row.children[0].textContent==="10"&&row.children[1].textContent==="History").querySelector("button").click()');
   await waitFor('document.querySelectorAll("#topic-audit article").length===19');
@@ -134,6 +135,27 @@ try {
   assert.match(await evaluate("location.search"),/material=timeline/);
   const reopened=await evaluate("location.pathname+location.search");
   await navigate(reopened,'document.querySelector("#topic-materials [role=status]")?.textContent.startsWith("Material 14 of 14")');
+  await evaluate('[...document.querySelectorAll(".lesson-page button")].find(button=>button.textContent.includes("Download for offline"))?.click()');
+  await waitFor('document.querySelector(".lesson-page").textContent.includes("Available offline")');
+  assert.match(await evaluate('document.querySelector(".lesson-page").textContent'),/still need internet/,"remote resource is clearly identified as requiring connectivity");
+  const offlineImageCached=await evaluate(`(async()=>{const db=await new Promise((resolve,reject)=>{const request=indexedDB.open("mina-teach-offline");request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)});const values=await new Promise((resolve,reject)=>{const request=db.transaction("downloads").objectStore("downloads").getAll();request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)});db.close();return values.find(item=>item.type==="lesson")?.responses?.["/api/learning/content/db-900002/materials?offset=6&limit=1"]?.materials?.[0]?.offlineImageDataUrl?.startsWith("data:image/")})()`);
+  assert.equal(offlineImageCached,true,"offline lesson record embeds the full same-origin diagram");
+  await browser.stopIntercept();
+  await command("Network.emulateNetworkConditions",{offline:true,latency:0,downloadThroughput:0,uploadThroughput:0});
+  await waitFor("navigator.onLine===false");
+  await command("Page.reload");
+  await waitFor('document.querySelector("#topic-materials [role=status]")?.textContent.startsWith("Material 14 of 14")');
+  for(let index=0;index<materials.length;index++) {
+    await evaluate(`(()=>{const select=document.querySelector("#topic-materials select");select.value="${index}";select.dispatchEvent(new Event("change"));})()`);
+    await waitFor(`document.querySelector("#topic-materials [role=status]").textContent.startsWith("Material ${index+1} of 14")`);
+    assert.equal(await evaluate('document.querySelector(".material-content>h3").textContent'),materials[index].title,`offline material ${index+1} opens completely`);
+    if(materials[index].type==="diagram") {
+      const diagramSource=await evaluate('document.querySelector(".material-diagram").src');
+      assert.equal(diagramSource.startsWith("data:image/"),true,`same-origin diagram is embedded in the offline lesson download: ${diagramSource.slice(0,120)}`);
+    }
+  }
+  await command("Network.emulateNetworkConditions",{offline:false,latency:0,downloadThroughput:10_000_000,uploadThroughput:10_000_000});
+  await waitFor("navigator.onLine===true");
   for(const path of ["/api/learning/lessons/manage/1","/api/learning/lessons/1/materials"]) {
     const status=await evaluate(`fetch(${JSON.stringify(path)},${path.endsWith("materials")?'{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"}':'{}'}).then(response=>response.status)`);
     assert.equal(status,401);

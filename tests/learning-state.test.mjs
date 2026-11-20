@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 const source=readFileSync(new URL("../learning/learning-state.js",import.meta.url),"utf8")
-  .replace('import {cachedApiResponse,getOfflineOwner,listOfflineExamResults,setOfflineOwner} from "./offline-store.js";',
-    'const cachedApiResponse=async()=>null;const getOfflineOwner=()=>globalThis.__offlineOwner||"guest";const setOfflineOwner=owner=>(globalThis.__offlineOwner=owner);const listOfflineExamResults=async()=>[];');
+  .replace('import {cachedApiResponse,getOfflineLearningState,getOfflineOwner,listOfflineExamResults,saveOfflineLearningState,setOfflineOwner} from "./offline-store.js";',
+    'const cachedApiResponse=async()=>null;const getOfflineLearningState=async()=>null;const getOfflineOwner=()=>globalThis.__offlineOwner||"guest";const saveOfflineLearningState=async()=>({});const setOfflineOwner=owner=>(globalThis.__offlineOwner=owner);const listOfflineExamResults=async()=>[];');
 const {normalizeState,mergeLearning,createStore,STORAGE_KEY,topicIsComplete,practiceContentVersion,validPracticeDraft}=await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
 function storage() {
   const entries=new Map();

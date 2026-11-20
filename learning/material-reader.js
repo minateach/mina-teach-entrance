@@ -44,7 +44,7 @@ function resource(parent,url,text) {
 }
 export async function renderMaterial(parent,material) {
   parent.replaceChildren(element("h3",material.title));
-  const used=new Set(["id","topicId","topicTitle","title","type","sourceLabel","sourceUrl","sourcePages"]);
+  const used=new Set(["id","topicId","topicTitle","title","type","sourceLabel","sourceUrl","sourcePages","offlineImageDataUrl"]);
   let imageReady=null;
   if(material.type==="table") {
     const wrap=element("div");wrap.className="material-table";const table=element("table");
@@ -63,7 +63,7 @@ export async function renderMaterial(parent,material) {
       image.onerror=()=>{clearTimeout(timer);reject(new Error("The diagram could not load. Its source link remains available; retry before marking this material accessed."));};
     });
     figure.append(image);if(material.caption){figure.append(element("figcaption",material.caption));used.add("caption");}
-    parent.append(figure);resource(parent,material.url,"Open diagram source");image.src=material.url;used.add("url");used.add("alt");
+    parent.append(figure);resource(parent,material.url,"Open diagram source");image.src=material.offlineImageDataUrl || material.url;used.add("url");used.add("alt");
   }
   if(material.type==="resource"){resource(parent,material.url,material.title);used.add("url");}
   if(material.type==="mcq") {

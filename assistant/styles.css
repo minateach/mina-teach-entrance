@@ -686,6 +686,17 @@ a {
   font-weight: 600;
 }
 
+.offline-ai-badge {
+  width: fit-content;
+  padding: 4px 8px;
+  border: 1px solid #c8daf2;
+  border-radius: 999px;
+  color: #184d89;
+  background: #eef5ff;
+  font-size: 10px;
+  font-weight: 700;
+}
+
 .message-content {
   padding: 12px 15px;
   border: 1px solid #e8e4db;
