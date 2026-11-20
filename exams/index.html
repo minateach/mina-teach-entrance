@@ -31,6 +31,8 @@
           <label>Difficulty<select id="difficulty"><option value="">All levels</option><option value="easy">Easy</option><option value="medium">Medium</option><option value="hard">Hard</option></select></label>
         </div>
         <p id="bank-status" class="status" role="status">Checking reviewed question count…</p>
+        <button id="download-offline" class="secondary" type="button">Download this question set</button>
+        <p id="offline-download-status" class="small" role="status">Choose filters and download reviewed questions for offline practice.</p>
         <button id="start-exam" disabled>Start practice</button>
         <p id="count-guidance" class="small">Practice sessions require enough reviewed questions for the selected length.</p>
       </section>
@@ -49,6 +51,7 @@
       <section class="panel" id="results" hidden></section>
       <aside class="panel" id="history"><h2>My exam history</h2><p class="muted">Sign in to keep results on your account.</p><div id="history-list"></div></aside>
     </section>
+    <section class="panel saved-panel"><h2>Offline practice downloads and results</h2><p class="muted">Question sets and device-only results stay on this device. They are not official exam results.</p><div id="offline-exam-downloads" class="muted">Loading offline practice data…</div></section>
     <section class="panel saved-panel"><h2>Saved questions</h2><div id="saved-questions" class="muted">Sign in to view saved questions.</div></section>
     <section id="educator" class="panel" hidden>
       <p class="eyebrow">AUTHORIZED EDUCATOR</p><h2>Question review and authoring</h2>
@@ -64,6 +67,7 @@
     </section>
     <footer>MINA TEACH AI · Dhaloota beekumsa omishuudha.</footer>
   </main>
-  <script src="/exams/app.js" defer></script>
+  <script src="/offline-status.js" defer></script>
+  <script type="module" src="/exams/bootstrap.js"></script>
 </body>
 </html>

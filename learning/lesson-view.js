@@ -1,5 +1,6 @@
 import {api,topicIsComplete,practiceContentVersion,validPracticeDraft} from "./learning-state.js";
 import {appendFullText,appendValue,mountMaterialReader} from "./material-reader.js";
+import {getOfflineDownload,makeOfflineLessonDownload,removeOfflineDownload} from "./offline-store.js";
 
 export function node(tag,text,className) {
   const element=document.createElement(tag);
@@ -73,6 +74,28 @@ export function renderLesson({root,lesson,course,store,changed}) {
   // This view is only built after successful detail loading; titles/failed requests cannot be completed.
   complete.disabled=typeof lesson.content!=="string" || lesson.content.trim().length<80;
   const practiceStatus=node("p",undefined,"muted");practiceStatus.setAttribute("role","status");
+  const offlineStatus=node("p",undefined,"muted");offlineStatus.setAttribute("role","status");
+  const downloadKey=`lesson:${lesson.grade}:${lesson.language}:${lesson.id}`;
+  const download=makeButton("Download for offline",async()=>{
+    download.disabled=true;offlineStatus.textContent="Downloading the complete lesson and its available topic materials…";
+    try {
+      const record=await makeOfflineLessonDownload({id:lesson.id,grade:lesson.grade,subject:lesson.subject,language:lesson.language});
+      offlineStatus.textContent=`Available offline · ${(record.bytes/1024/1024).toFixed(1)} MB stored on this device.`;
+      download.textContent="Downloaded for offline ✓";removeDownload.hidden=false;
+      window.dispatchEvent(new Event("mina:offline-change"));
+    } catch(error) {offlineStatus.textContent=error.message;}
+    finally {download.disabled=false;}
+  });
+  const removeDownload=makeButton("Remove offline copy",async()=>{
+    removeDownload.disabled=true;
+    try {await removeOfflineDownload(downloadKey);offlineStatus.textContent="Offline copy removed from this device.";download.textContent="Download for offline";removeDownload.hidden=true;window.dispatchEvent(new Event("mina:offline-change"));}
+    catch(error){offlineStatus.textContent=error.message;}
+    finally {removeDownload.disabled=false;}
+  });
+  removeDownload.hidden=true;
+  getOfflineDownload(downloadKey).then(record=>{
+    if(record){download.textContent="Downloaded for offline ✓";offlineStatus.textContent=`Available offline · ${(record.bytes/1024/1024).toFixed(1)} MB stored on this device.`;removeDownload.hidden=false;}
+  }).catch(error=>{offlineStatus.textContent=error.message;});
   const practice=makeButton("Start practice",async()=>{
     practice.disabled=true;
     try {
@@ -97,7 +120,7 @@ export function renderLesson({root,lesson,course,store,changed}) {
     finally{practice.disabled=false;}
   });
   practice.id="start-practice";
-  controls.append(save,complete);
+  controls.append(save,complete,download,removeDownload);
   if(lesson.questions?.length || outline.some(material=>material.type==="mcq")) controls.append(practice);
   else {
     const link=node("a","Start practice","button-secondary");
@@ -108,6 +131,7 @@ export function renderLesson({root,lesson,course,store,changed}) {
   root.append(topicStatus);
   root.append(accessStatus);
   root.append(practiceStatus);
+  root.append(offlineStatus);
   const topicNavigation=node("nav",undefined,"history-lesson-section");
   topicNavigation.setAttribute("aria-label","Topic navigation");
   topicNavigation.append(node("h3","Learning topics"));

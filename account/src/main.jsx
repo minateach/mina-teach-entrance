@@ -4,6 +4,7 @@ import { ClerkProvider, SignIn, SignUp, useClerk, useUser } from "@clerk/react";
 import { publishableKeyFromHost } from "@clerk/shared/keys";
 import { Redirect, Route, Router as WouterRouter, Switch, useLocation } from "wouter";
 import { shadcn } from "@clerk/themes";
+import { clearOfflineOwner } from "../../learning/offline-store.js";
 import "./style.css";
 import "./brand.css";
 
@@ -88,16 +89,21 @@ function AccountPage() {
     const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "mina-teach-account-data.json"; link.click(); URL.revokeObjectURL(url);
   };
   const deleteData = async () => {
-    if (!window.confirm("Delete saved conversations, study progress, and preferences from this account and this browser? This cannot be undone.")) return;
+    if (!window.confirm("Delete saved conversations, study progress, preferences, offline downloads, and device-only exam results from this account and this browser? This cannot be undone.")) return;
     setBusy(true);
     try {
       await request("/api/account/data", { method: "DELETE" });
       Object.values(localKeys).forEach(key => localStorage.removeItem(key));
+      const offlineOwner = `account:${user.id}`;
+      localStorage.removeItem(`minaTeach.learning.v1:${offlineOwner}`);
+      localStorage.removeItem(`minaTeach.exam.bookmarks.v1:${encodeURIComponent(offlineOwner)}`);
+      localStorage.removeItem(`mina-teach-active-exam-v2:${encodeURIComponent(offlineOwner)}`);
       const imagesDeleted = await deleteLocalAssistantImages();
+      const offlineDataDeleted = await clearOfflineOwner(offlineOwner).then(() => true).catch(() => false);
       setRecords({}); setPreferences({ language: "en" });
-      setNotice(imagesDeleted
-        ? "Your saved Mina Teach data and local image attachments were deleted. Your sign-in account remains active."
-        : "Your saved account data was deleted. Close other Mina Teach tabs, then repeat deletion to clear local image attachments.");
+      setNotice(imagesDeleted && offlineDataDeleted
+        ? "Your saved Mina Teach data, offline downloads, device-only exam results, and local image attachments were deleted. Your sign-in account remains active."
+        : "Your server account data was deleted. Some local browser attachments or downloads could not be confirmed as removed; close other Mina Teach tabs and repeat deletion to retry.");
     }
     catch (error) { setNotice(error.message); }
     finally { setBusy(false); }
@@ -125,7 +131,7 @@ function AccountPage() {
       <p className="eyebrow">STUDENT ACCOUNT</p><h1>Hello, {user.firstName || "student"}</h1><p className="muted">{user.primaryEmailAddress?.emailAddress}</p><p className="status" role="status">{status}</p>
       <form onSubmit={saveProfile} className="preferences"><label>Profile name<input value={profileName} maxLength={100} onChange={event => setProfileName(event.target.value)} required /></label><button disabled={busy}>Save profile</button></form>
       <form onSubmit={savePreferences} className="preferences"><label>Reply language<select value={preferences.language || "en"} onChange={event => setPreferences({ ...preferences, language: event.target.value })}><option value="en">English</option><option value="om">Afaan Oromoo</option><option value="am">Amharic</option></select></label><button disabled={busy}>Save preferences</button></form>
-      <section className="data-section"><h2>Your saved data</h2><p>Conversations: {count(records.conversations)} · Learning records: {count(records.learning)}</p><div className="actions"><button disabled={busy} onClick={importLocal}>Import this browser’s study data</button><button className="secondary" onClick={exportData}>Download a copy</button><button className="danger" disabled={busy} onClick={deleteData}>Delete saved Mina Teach data</button></div><p className="muted small">Import copies data to your account and leaves the browser copy unchanged. Delete removes your stored Mina Teach data but does not delete your sign-in account.</p><p className="muted small">Assistant images are saved only on this device and are not included in account downloads. Delete saved data removes them from this browser.</p>{notice && <p className="notice" role="status">{notice}</p>}</section>
+      <section className="data-section"><h2>Your saved data</h2><p>Conversations: {count(records.conversations)} · Learning records: {count(records.learning)}</p><div className="actions"><button disabled={busy} onClick={importLocal}>Import this browser’s study data</button><button className="secondary" onClick={exportData}>Download a copy</button><button className="danger" disabled={busy} onClick={deleteData}>Delete saved Mina Teach data</button></div><p className="muted small">Import copies data to your account and leaves the browser copy unchanged. Delete removes your stored Mina Teach data but does not delete your sign-in account.</p><p className="muted small">Assistant images and offline lesson downloads are saved only on this device and are not included in account downloads. Delete saved data removes them from this browser.</p>{notice && <p className="notice" role="status">{notice}</p>}</section>
     </section>
     <p className="privacy">Your account is used to save your Mina Teach conversations and learning progress. You control importing, downloading, and deleting these saved records.</p>
   </main>;

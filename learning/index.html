@@ -93,6 +93,11 @@
       <div class="section-heading"><div><p class="eyebrow">QUICK ACCESS</p><h2>Saved lessons</h2></div></div>
       <div id="saved-lessons" class="saved-list"><p class="muted">Save a lesson from a subject to find it here.</p></div>
     </section>
+    <section class="panel saved-panel" aria-labelledby="offline-downloads-title">
+      <div class="section-heading"><div><p class="eyebrow">STUDY WITHOUT INTERNET</p><h2 id="offline-downloads-title">Offline downloads</h2></div></div>
+      <p class="muted">Only complete lessons you choose to download appear here. Downloads stay on this device.</p>
+      <div id="offline-download-list" class="saved-list" role="status">Loading offline downloads…</div>
+    </section>
     <section class="panel saved-panel" aria-labelledby="quiz-progress-title">
       <div class="section-heading"><div><p class="eyebrow">RESULTS</p><h2 id="quiz-progress-title">Quiz progress</h2></div></div>
       <div id="quiz-progress" class="muted" role="status">Sign in to load saved quiz results.</div>
@@ -100,6 +105,7 @@
     <footer>MINA TEACH AI · Dhaloota beekumsa omishuudha.</footer>
   </main>
 
+  <script src="/offline-status.js" defer></script>
   <script type="module" src="/learning/dashboard.js"></script>
 </body>
 </html>

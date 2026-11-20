@@ -1,9 +1,33 @@
+import {cachedApiResponse,getOfflineOwner,listOfflineExamResults,setOfflineOwner} from "./offline-store.js";
+
 export const STORAGE_KEY = "minaTeach.learning.v1";
 export async function api(url, options={}) {
-  const response=await fetch(url,{credentials:"same-origin",...options,headers:{"Content-Type":"application/json",...options.headers}});
+  const method=String(options.method || "GET").toUpperCase();
+  let response;
+  try {
+    response=await fetch(url,{credentials:"same-origin",...options,headers:{"Content-Type":"application/json",...options.headers}});
+  } catch(error) {
+    if(method==="GET") {
+      try {
+        const target=new URL(url,location.origin);
+        const cached=await cachedApiResponse(target.pathname+target.search);
+        if(cached!==null)return cached;
+      } catch {}
+    }
+    throw error;
+  }
   let data;
   try { data=await response.json(); } catch { throw new Error("The server returned an unreadable response. Please retry."); }
-  if (!response.ok) { const error=new Error(data?.error?.message || "The request failed. Please retry."); error.status=response.status; throw error; }
+  if (!response.ok) {
+    if(method==="GET" && response.status>=500) {
+      try {
+        const target=new URL(url,location.origin);
+        const cached=await cachedApiResponse(target.pathname+target.search);
+        if(cached!==null)return cached;
+      } catch {}
+    }
+    const error=new Error(data?.error?.message || "The request failed. Please retry."); error.status=response.status; throw error;
+  }
   return data;
 }
 const list = value => Array.isArray(value)?value:[];
@@ -61,7 +85,7 @@ export function validPracticeDraft(draft,lesson) {
 export function createStore(statusChanged=()=>{}) {
   let key=STORAGE_KEY, state=normalizeState(), signedIn=false, readyForSync=false,identity=null;
   let identityConfirmed=false;
-  let revision=0,queue=Promise.resolve();
+  let revision=0,queue=Promise.resolve(),offlineLocal=false;
   function read(storageKey) {
     try { return normalizeState(JSON.parse(localStorage.getItem(storageKey)||"{}")); }
     catch { statusChanged("Stored learning data could not be read. Existing browser data has not been deleted."); return normalizeState(); }
@@ -84,9 +108,26 @@ export function createStore(statusChanged=()=>{}) {
     });
     return queue;
   }
+  async function attachOfflineResults(owner) {
+    const results=await listOfflineExamResults(owner).catch(()=>[]);
+    if(!results.length)return false;
+    const known=new Set(state.practice.map(item=>item.id));
+    let added=false;
+    for(const result of results) {
+      if(known.has(result.id))continue;
+      state.practice.push({
+        id:result.id,grade:result.grade,subject:result.subject || "Offline practice",
+        lesson:result.mode==="entrance"?"Downloaded entrance practice":"Downloaded reviewed practice",
+        score:result.score,total:result.total,completedAt:result.completedAt,kind:"offline_reviewed_exam",
+      });
+      known.add(result.id);added=true;
+    }
+    return added;
+  }
   return {
     get state(){return state;},get signedIn(){return signedIn;},
     async confirmPracticeIdentity() {
+      if(offlineLocal)return;
       const status=await api("/api/account/status");
       if(!identityConfirmed || !!status.signedIn!==!!signedIn || (signedIn && status.userId!==identity))
         throw new Error("Your account changed or could not be confirmed. Reload before continuing lesson practice.");
@@ -113,24 +154,53 @@ export function createStore(statusChanged=()=>{}) {
       if(result)this.save();
     },
     async initialize() {
-      key=STORAGE_KEY;signedIn=false;readyForSync=false;identity=null;identityConfirmed=false;
+      key=STORAGE_KEY;signedIn=false;readyForSync=false;identity=null;identityConfirmed=false;offlineLocal=false;
       state=read(STORAGE_KEY);
       try {
         const status=await api("/api/account/status");
         signedIn=status.signedIn;
-        if(!signedIn) { identityConfirmed=true;state=read(STORAGE_KEY); statusChanged("Learning is saved on this device. Sign in to use your private account data."); return; }
+        if(!signedIn) {
+          setOfflineOwner("guest");identityConfirmed=true;state=read(STORAGE_KEY);
+          if(await attachOfflineResults("guest"))localSave();
+          statusChanged("Learning is saved on this device. Sign in to use your private account data."); return;
+        }
         if(!status.userId) throw new Error("Your account identity could not be confirmed. Please reload.");
         identity=status.userId;
+        setOfflineOwner(`account:${identity}`);
         identityConfirmed=true;
         key=`${STORAGE_KEY}:account:${status.userId}`;
         const cached=read(key); state=cached;
         const data=await api("/api/account/data");
         // Guest data is only imported through the existing explicit Account import flow.
         state=cached._pendingSync?mergeLearning(data.records?.learning,cached):normalizeState(data.records?.learning);
+        const offlineResults=await listOfflineExamResults(`account:${identity}`).catch(()=>[]);
+        await attachOfflineResults(`account:${identity}`);
         readyForSync=true; localSave();
-        statusChanged("Your private account learning data is loaded.");
-        if(cached._pendingSync) await sync();
-      } catch(error) { readyForSync=false; statusChanged(`${error.message} Account sync is unavailable; no account data has been overwritten.`); }
+        let offlineResultsPending=false;
+        if(offlineResults.length) {
+          try {
+            await api("/api/account/data/learning/offline-results",{
+              method:"POST",
+              body:JSON.stringify({expectedUserId:identity,results:offlineResults}),
+            });
+          } catch {offlineResultsPending=true;}
+        }
+        statusChanged(offlineResultsPending
+          ? "Your private account learning data is loaded. Device-only exam results remain saved here and will retry account sync."
+          : "Your private account learning data is loaded.");
+        if(state._pendingSync) await sync();
+      } catch(error) {
+        readyForSync=false;offlineLocal=true;
+        const owner=getOfflineOwner();
+        if(owner.startsWith("account:")) {
+          identity=owner.slice("account:".length);signedIn=true;key=`${STORAGE_KEY}:account:${identity}`;state=read(key);
+          identityConfirmed=true;
+          statusChanged("Offline mode: saved account progress is available on this device. Changes will sync only after your account is confirmed online.");
+        } else {
+          signedIn=false;key=STORAGE_KEY;state=read(STORAGE_KEY);identityConfirmed=true;
+          statusChanged("Offline mode: guest learning progress and downloaded lessons are available on this device. Account data and sync require internet.");
+        }
+      }
     },
     save() {
       revision++; state._pendingSync=!!signedIn;
@@ -145,6 +215,6 @@ export function createStore(statusChanged=()=>{}) {
       else { state[collection].unshift(item); state[tombstones]=state[tombstones].filter(key=>key!==item.key); }
       this.save(); return index<0;
     },
-    async retry() { if(!readyForSync) await this.initialize(); else await sync(); },
+    async retry() { await this.initialize(); },
   };
 }

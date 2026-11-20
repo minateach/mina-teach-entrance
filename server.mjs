@@ -640,6 +640,9 @@ async function handleAssistantStatus(response) {
 
 function publicFilePath(pathname) {
   if (pathname === "/" || pathname === "/index.html") return "index.html";
+  if (pathname === "/offline.html") return "offline.html";
+  if (pathname === "/service-worker.js") return "service-worker.js";
+  if (pathname === "/offline-status.js") return "offline-status.js";
   if (pathname === "/manifest.webmanifest") return "manifest.webmanifest";
   if (pathname.startsWith("/images/")) {
     const imageName = pathname.slice("/images/".length);
@@ -657,7 +660,7 @@ function publicFilePath(pathname) {
     return "learning/index.html";
   }
   if (pathname === "/exams" || pathname === "/exams/") return "exams/index.html";
-  if (new Set(["/exams/app.js", "/exams/styles.css"]).has(pathname)) return pathname.slice(1);
+  if (new Set(["/exams/app.js", "/exams/styles.css", "/exams/bootstrap.js"]).has(pathname)) return pathname.slice(1);
   if (pathname === "/admin" || pathname === "/admin/") return "admin/index.html";
   if (new Set(["/admin/app.js", "/admin/styles.css"]).has(pathname)) return pathname.slice(1);
   if (pathname === "/account" || pathname === "/account/" || pathname.startsWith("/account/sign-in") || pathname.startsWith("/account/sign-up")) {
@@ -671,7 +674,7 @@ function publicFilePath(pathname) {
   if (allowedTopLevelFiles.has(pathname)) return pathname.slice(1);
   if (pathname.startsWith("/assistant/")) return pathname.slice(1);
   if (pathname.startsWith("/image-studio/")) return pathname.slice(1);
-  if (new Set(["/learning/app.js", "/learning/styles.css", "/learning/library.css", "/learning/history-grade10.js", "/learning/dashboard.js", "/learning/learning-state.js", "/learning/lesson-view.js", "/learning/material-reader.js", "/learning/coverage.html", "/learning/coverage.js"]).has(pathname)) {
+  if (new Set(["/learning/app.js", "/learning/styles.css", "/learning/library.css", "/learning/history-grade10.js", "/learning/dashboard.js", "/learning/learning-state.js", "/learning/lesson-view.js", "/learning/material-reader.js", "/learning/offline-store.js", "/learning/coverage.html", "/learning/coverage.js"]).has(pathname)) {
     return pathname.slice(1);
   }
   return null;
@@ -712,6 +715,7 @@ async function serveStatic(pathname, request, response) {
     response.writeHead(200, {
       "Content-Type": contentTypes[extname(absolutePath).toLowerCase()] || "application/octet-stream",
       "Cache-Control": "no-store",
+      ...(pathname === "/service-worker.js" ? { "Service-Worker-Allowed": "/" } : {}),
       "Content-Length": content.length,
     });
     response.end(request.method === "HEAD" ? undefined : content);
@@ -881,6 +885,66 @@ app.put("/api/account/data/:type", requireAuth, async (request, response) => {
   } catch (error) {
     sendError(response, error.statusCode || 500, error.statusCode ? "INVALID_REQUEST" : "ACCOUNT_STORAGE_ERROR", error.statusCode ? error.message : "Your data could not be saved.");
   }
+});
+
+app.post("/api/account/data/learning/offline-results", requireAuth, async (request, response) => {
+  if (!isSameOrigin(request)) {
+    sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed.");
+    return;
+  }
+  let client;
+  try {
+    const input = await readJsonBody(request, 120_000);
+    if (input?.expectedUserId !== request.userId || !Array.isArray(input.results) || input.results.length > 100) {
+      sendError(response, 400, "INVALID_OFFLINE_RESULTS", "The signed-in account or offline results could not be confirmed.");
+      return;
+    }
+    const results = input.results.map(item => {
+      if (!item || typeof item.id !== "string" || !/^offline-[A-Za-z0-9-]{20,80}$/.test(item.id) ||
+          !["practice", "entrance"].includes(item.mode) ||
+          !(item.grade === null || [9, 10, 11, 12].includes(Number(item.grade))) ||
+          !(item.subject === null || typeof item.subject === "string" && item.subject.length <= 80) ||
+          !Number.isInteger(item.score) || !Number.isInteger(item.total) ||
+          ![10, 20, 30, 60].includes(item.total) || item.score < 0 || item.score > item.total ||
+          typeof item.completedAt !== "string" || !Number.isFinite(Date.parse(item.completedAt))) return null;
+      return {
+        id: item.id, grade: item.grade === null ? null : Number(item.grade),
+        subject: item.subject || (item.mode === "entrance" ? "Mixed entrance practice" : "Offline practice"),
+        lesson: item.mode === "entrance" ? "Downloaded entrance practice" : "Downloaded reviewed practice",
+        score: item.score, total: item.total, completedAt: item.completedAt, kind: "offline_reviewed_exam",
+      };
+    });
+    if (results.some(item => !item)) {
+      sendError(response, 400, "INVALID_OFFLINE_RESULTS", "One or more device-only results are invalid.");
+      return;
+    }
+    await ensureStudentRole(request.userId);
+    client = await pool.connect();
+    await client.query("BEGIN");
+    const current = await client.query(
+      "SELECT data FROM mina_user_records WHERE user_id=$1 AND record_type='learning' FOR UPDATE",
+      [request.userId],
+    );
+    const data = current.rows[0]?.data && typeof current.rows[0].data === "object" ? current.rows[0].data : {};
+    const practice = Array.isArray(data.practice) ? data.practice : [];
+    const merged = [...new Map([...practice, ...results].map(item => [item.id, item])).values()]
+      .sort((a, b) => String(b.completedAt).localeCompare(String(a.completedAt))).slice(0, 200);
+    const updated = { ...data, practice: merged };
+    if (Buffer.byteLength(JSON.stringify(updated)) > 900_000) {
+      await client.query("ROLLBACK");
+      sendError(response, 413, "ACCOUNT_DATA_LIMIT", "The learning record is too large to safely add these results.");
+      return;
+    }
+    await client.query(
+      "INSERT INTO mina_user_records (user_id,record_type,data) VALUES ($1,'learning',$2::jsonb) ON CONFLICT (user_id,record_type) DO UPDATE SET data=EXCLUDED.data,updated_at=NOW()",
+      [request.userId, JSON.stringify(updated)],
+    );
+    await client.query("COMMIT");
+    sendJson(response, 200, { saved: true, received: results.length });
+  } catch {
+    if (client) await client.query("ROLLBACK").catch(() => {});
+    sendError(response, 503, "OFFLINE_RESULTS_SYNC_FAILED", "Offline results remain on this device; account synchronization can be retried.");
+  } finally { client?.release(); }
 });
 
 app.post("/api/account/import", requireAuth, async (request, response) => {
@@ -1126,6 +1190,38 @@ app.get("/api/questions", async (request, response) => {
       pool.query(`SELECT id,grade,stream,subject,chapter,prompt,choices,difficulty,source_label,source_kind FROM mina_questions ${where} ORDER BY id LIMIT 200`, params),
     ]);
     sendJson(response, 200, { count: count.rows[0].count, questions: result.rows.map(publicQuestion), official: false });
+  } catch (error) {
+    sendError(response, 400, "INVALID_FILTER", error.message);
+  }
+});
+
+app.get("/api/questions/offline-download", async (request, response) => {
+  try {
+    const mode = request.query.mode === "entrance" ? "entrance" : "practice";
+    const limit = Number(request.query.limit);
+    if (![10, 20, 30, 60].includes(limit)) {
+      sendError(response, 400, "INVALID_OFFLINE_QUESTION_COUNT", "Download 10, 20, 30, or 60 questions.");
+      return;
+    }
+    const { where, params } = questionFilters(mode === "entrance" ? {} : request.query);
+    const sql = mode === "entrance"
+      ? `SELECT id,grade,stream,subject,chapter,prompt,choices,correct_index,explanation,difficulty,source_label,source_kind FROM (SELECT id,grade,stream,subject,chapter,prompt,choices,correct_index,explanation,difficulty,source_label,source_kind,ROW_NUMBER() OVER (PARTITION BY grade,subject ORDER BY random()) AS mix_rank FROM mina_questions ${where}) mixed ORDER BY mix_rank,random() LIMIT $${params.length + 1}`
+      : `SELECT id,grade,stream,subject,chapter,prompt,choices,correct_index,explanation,difficulty,source_label,source_kind FROM mina_questions ${where} ORDER BY id LIMIT $${params.length + 1}`;
+    const result = await pool.query(sql, [...params, limit]);
+    if (result.rows.length < limit) {
+      sendError(response, 409, "OFFLINE_QUESTION_SET_INSUFFICIENT", `This download needs ${limit} reviewed questions; only ${result.rows.length} match the selection.`);
+      return;
+    }
+    sendJson(response, 200, {
+      count: result.rows.length,
+      questions: result.rows.map(row => ({
+        ...publicQuestion(row),
+        correctIndex: row.correct_index,
+        explanation: row.explanation,
+      })),
+      official: false,
+      use: "Downloaded review questions for local practice. Offline scores are saved on this device and are not official exam results.",
+    });
   } catch (error) {
     sendError(response, 400, "INVALID_FILTER", error.message);
   }

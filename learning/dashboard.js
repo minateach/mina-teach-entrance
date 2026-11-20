@@ -1,5 +1,6 @@
 import {api,createStore,topicIsComplete} from "./learning-state.js";
 import {node,lessonUrl,courseUrl,practiceUrl,topicParams,renderLesson} from "./lesson-view.js";
+import {listOfflineDownloads,removeOfflineDownload} from "./offline-store.js";
 
 const $=id=>document.getElementById(id);
 const store=createStore(message=>{$("sync-status").textContent=message;});
@@ -37,7 +38,7 @@ function changed() {updateProgress();renderSaved();renderResults();}
 function renderResults() {
   const box=$("quiz-progress");box.replaceChildren();
   const local=store.state.practice.filter(attempt=>attempt.grade===scope?.grade).slice(0,8);
-  local.forEach(attempt=>box.append(node("p",`${attempt.kind==="published_lesson"?"Published lesson practice":"AI-authored practice"} · Grade ${attempt.grade} ${attempt.subject} · Lesson ${attempt.lesson} · ${attempt.score}/${attempt.total}`)));
+  local.forEach(attempt=>box.append(node("p",`${attempt.kind==="published_lesson"?"Published lesson practice":attempt.kind==="offline_reviewed_exam"?"Downloaded reviewed offline practice":"AI-authored practice"} · ${attempt.grade?`Grade ${attempt.grade} `:""}${attempt.subject} · ${attempt.lesson} · ${attempt.score}/${attempt.total}`)));
   examHistory.filter(attempt=>Number(attempt.grade)===scope?.grade).slice(0,8).forEach(attempt=>box.append(node("p",`Reviewed-bank ${attempt.mode || "practice"} · ${attempt.subject || "All subjects"} · ${attempt.score}/${attempt.total}`)));
   if(!box.children.length)box.append(node("p","No practice results for this grade yet."));
   if(examError)box.append(node("p",examError,"notice"));
@@ -65,6 +66,25 @@ function renderSaved() {
       row.append(open,remove,message);box.append(row);
     });
   }
+}
+async function renderOfflineDownloads() {
+  const box=$("offline-download-list");box.replaceChildren();
+  try {
+    const downloads=(await listOfflineDownloads()).filter(item=>item.type==="lesson");
+    if(!downloads.length){box.append(node("p","No lessons downloaded yet. Open a lesson while online and select “Download for offline”.","muted"));return;}
+    downloads.forEach(item=>{
+      const row=node("div",undefined,"saved-chip");
+      const message=node("p",`${(item.bytes/1024/1024).toFixed(1)} MB · saved on this device`,"muted");
+      const metadata=item.data || {};
+      const open=link(item.title,lessonUrl({id:metadata.id,grade:metadata.grade,subject:metadata.subject,language:metadata.language}));
+      const remove=button("Remove download",async()=>{
+        remove.disabled=true;
+        try {await removeOfflineDownload(item.resourceKey);await renderOfflineDownloads();}
+        catch(error){message.textContent=error.message;remove.disabled=false;}
+      });
+      row.append(open,remove,message);box.append(row);
+    });
+  } catch(error) {box.append(node("p",error.message,"notice"));}
 }
 function renderTasks() {
   $("task-list").replaceChildren();
@@ -218,7 +238,7 @@ async function loadPage(force=false) {
         if(!startPractice && topic!==null && /^[A-Za-z0-9_-]{1,80}$/.test(topic))requestAnimationFrame(()=>document.getElementById(`topic-${topic}`)?.scrollIntoView());
       } else renderCourse(params.get("chapter"));
     }
-    updateProgress();renderSaved();renderTasks();renderResults();
+    updateProgress();renderSaved();renderTasks();renderResults();renderOfflineDownloads();
     if(!inCourse)loadLibrary();
   } catch(error) {if(version!==renderVersion)return;errorView(error);updateProgress();}
 }
@@ -262,6 +282,8 @@ let searchTimer;
 $("lesson-search").addEventListener("input",()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>loadLibrary(),250);});
 window.addEventListener("popstate",()=>loadPage());
 await store.initialize();
+window.addEventListener("online",()=>store.retry());
+window.addEventListener("mina:offline-change",renderOfflineDownloads);
 await loadPage();
 if(store.signedIn) {
   try { examHistory=(await api("/api/exams/history")).attempts; }

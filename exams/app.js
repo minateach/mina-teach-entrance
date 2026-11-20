@@ -23,16 +23,30 @@
       available=result.count;
       $("bank-status").textContent=available>=required ? `${available} reviewed questions available. This session will contain ${required} questions.` : `${required} reviewed questions are required to start. ${available} currently match this selection.`;
       $("start-exam").disabled=starting || available<required;
-    } catch(e) { if(version===countVersion)$("bank-status").textContent=e.message; }
+    } catch(e) {
+      if(version!==countVersion)return;
+      const mode=$("mode").value,required=mode==="entrance"?60:Number($("question-count").value);
+      try {
+        const cached=await window.MinaOffline.getOfflineQuestionSet({...filters(),mode},required);
+        if(cached?.questions?.length>=required) {
+          available=cached.questions.length;
+          $("bank-status").textContent=`Offline: ${available} downloaded reviewed questions are ready for local practice. Scores stay on this device.`;
+          $("start-exam").disabled=starting || available<required;
+          $("offline-download-status").textContent="You can start this downloaded set without internet.";
+          return;
+        }
+      } catch {}
+      $("bank-status").textContent=`${e.message} Download a reviewed question set while online before using it offline.`;
+    }
   }
   function saveAttemptState(){
     if(!attempt)return;
-    try{sessionStorage.setItem(examStorageKey,JSON.stringify({attempt,selection,position,answers,remainingByQuestion,deadlinesByQuestion,correctByQuestion,practiceFeedback}));}catch{}
+    try{localStorage.setItem(window.MinaOffline.offlineDraftKey(),JSON.stringify({attempt,selection,position,answers,remainingByQuestion,deadlinesByQuestion,correctByQuestion,practiceFeedback}));}catch{}
   }
-  function clearSavedAttempt(){try{sessionStorage.removeItem(examStorageKey);}catch{}}
+  function clearSavedAttempt(){try{localStorage.removeItem(window.MinaOffline.offlineDraftKey());sessionStorage.removeItem(examStorageKey);}catch{}}
   function restoreAttemptState(force=false){
     try{
-      const state=JSON.parse(sessionStorage.getItem(examStorageKey)||"null");
+      const state=JSON.parse(localStorage.getItem(window.MinaOffline.offlineDraftKey())||sessionStorage.getItem(examStorageKey)||"null");
       if(!state?.attempt?.attemptId||!Array.isArray(state.attempt.questions)||!state.attempt.questions.length)return false;
       if(!state.attempt.questions.every(question=>question.id!=null && typeof question.prompt==="string" && typeof question.sourceKind==="string" && question.sourceKind.trim() && typeof question.sourceLabel==="string" && question.sourceLabel.trim() && Array.isArray(question.choices) && question.choices.length===4 && question.choices.every(choice=>typeof choice==="string"))) {
         pendingSaved=state;invalidSavedState=true;return false;
@@ -121,7 +135,15 @@
     const feedback=$("answer-feedback");feedback.hidden=true;feedback.textContent="";
     if(attempt.mode==="practice"&&practiceFeedback[String(q.id)])showPracticeFeedback(practiceFeedback[String(q.id)]);
     q.choices.forEach((value,index)=>{const button=document.createElement("button");button.className="choice";button.textContent=`${String.fromCharCode(65+index)}. ${value}`;button.setAttribute("aria-pressed",String(chosen===index));button.onclick=()=>{if(submitting||transitioning)return;if(attempt.mode==="practice"){submitPracticeAnswer(q,index);return;}if(remainingFor(String(q.id))<=0)return;chosen=index;answers[String(q.id)]=chosen;document.querySelectorAll(".choice").forEach(el=>el.setAttribute("aria-pressed","false"));button.setAttribute("aria-pressed","true");renderQuestionNav();saveAttemptState();};$("choices").append(button);});
-    $("bookmark").onclick=async()=>{try{await api(`/api/questions/${q.id}/bookmark`,{method:"PUT"});$("bookmark").textContent="★ Saved";}catch(e){$("bookmark").textContent=e.status===401?"Sign in to save":"Could not save";}};
+  $("bookmark").onclick=async()=>{
+    if(attempt.localOnly || !navigator.onLine) {
+      try {$("bookmark").textContent=window.MinaOffline.toggleBookmark(q)?"★ Saved on this device":"☆ Save question";}
+      catch {$("bookmark").textContent="Could not save offline";}
+      return;
+    }
+    try{await api(`/api/questions/${q.id}/bookmark`,{method:"PUT"});$("bookmark").textContent="★ Saved";}
+    catch(e){try{window.MinaOffline.toggleBookmark(q);$("bookmark").textContent="★ Saved on this device";}catch{$("bookmark").textContent=e.status===401?"Sign in to save":"Could not save";}}
+  };
     $("previous").disabled=position===0;
     $("next").hidden=position===attempt.total-1;
     $("submit-exam").hidden=position!==attempt.total-1;
@@ -137,7 +159,15 @@
     const feedback=$("answer-feedback");feedback.hidden=false;feedback.textContent="Checking and saving your answer…";
     $("choices").querySelectorAll("button").forEach(button=>button.disabled=true);
     try{
-      const result=await api(`/api/exams/${attempt.attemptId}/answer`,{method:"POST",body:JSON.stringify({questionId:question.id,choice:index})});
+      const result=attempt.localOnly
+        ? {
+            questionId:String(question.id),selectedIndex:index,correctIndex:question.correctIndex,
+            correctAnswer:question.choices[question.correctIndex],explanation:question.explanation,
+            isCorrect:index===question.correctIndex,
+            score:Object.entries({...answers,[String(question.id)]:index}).filter(([id,choice])=>
+              attempt.questions.some(item=>String(item.id)===id && item.correctIndex===choice)).length,
+          }
+        : await api(`/api/exams/${attempt.attemptId}/answer`,{method:"POST",body:JSON.stringify({questionId:question.id,choice:index})});
       chosen=index;answers[String(question.id)]=index;correctByQuestion[String(question.id)]=result.isCorrect;practiceFeedback[String(question.id)]=result;
       $("choices").querySelectorAll(".choice").forEach((button,i)=>{button.disabled=false;button.setAttribute("aria-pressed",String(i===index));});
       showPracticeFeedback(result);renderQuestionNav();$("retry-wrong").hidden=!Object.values(correctByQuestion).includes(false);saveAttemptState();loadHistory();
@@ -161,11 +191,28 @@
     const currentId=questionId();remaining=remainingFor(currentId);remainingByQuestion[currentId]=remaining;delete deadlinesByQuestion[currentId];saveAttemptState();
     $("submit-exam").disabled=true;$("exam").hidden=true;$("results").hidden=false;$("results").innerHTML="<h2>Saving your result…</h2>";
     try{
-      const result=await api(`/api/exams/${attempt.attemptId}/submit`,{method:"POST",body:JSON.stringify({answers})});
+      let result;
+      if(attempt.localOnly) {
+        const review=attempt.questions.map(question=>{
+          const selectedIndex=Number.isInteger(answers[String(question.id)])?answers[String(question.id)]:null;
+          return {...question,selectedIndex,correctIndex:question.correctIndex,isCorrect:selectedIndex===question.correctIndex};
+        });
+        const score=review.filter(question=>question.isCorrect).length;
+        result={score,total:review.length,percentage:Math.round(score*100/review.length),review};
+        const localResult={
+          id:attempt.attemptId,mode:attempt.mode,grade:attempt.selection?.grade || null,
+          subject:attempt.selection?.subject || null,stream:attempt.selection?.stream || null,
+          score,total:review.length,percentage:result.percentage,completedAt:new Date().toISOString(),
+          official:false,answers:review.map(question=>({id:String(question.id),selectedIndex:question.selectedIndex,isCorrect:question.isCorrect})),
+        };
+        await window.MinaOffline.saveOfflineExamResult(localResult);
+      } else {
+        result=await api(`/api/exams/${attempt.attemptId}/submit`,{method:"POST",body:JSON.stringify({answers})});
+      }
       const box=$("results");box.replaceChildren();
       const title=document.createElement("h2");title.textContent=`Result: ${result.score} / ${result.total} (${result.percentage}%)`;box.append(title);
       const unanswered=result.review.filter(q=>q.selectedIndex===null).length,wrong=result.total-result.score-unanswered;
-      const summary=document.createElement("p");summary.textContent=`Questions: ${result.total} · Correct: ${result.score} · Incorrect: ${wrong} · Unanswered: ${unanswered} · Total marks: ${result.total} · ${result.percentage}% · ${result.percentage>=50?"Pass":"Fail"} (50% pass mark)`;box.append(summary);
+      const summary=document.createElement("p");summary.textContent=`${attempt.localOnly?"Device-only practice result · not an official exam · ":""}Questions: ${result.total} · Correct: ${result.score} · Incorrect: ${wrong} · Unanswered: ${unanswered} · Total marks: ${result.total} · ${result.percentage}% · ${result.percentage>=50?"Pass":"Fail"} (50% pass mark)`;box.append(summary);
       const weakSubjects=[...new Set(result.review.filter(q=>!q.isCorrect).map(q=>q.subject))];
       if(weakSubjects.length){const weak=document.createElement("p");weak.textContent=`Subjects to practice more: ${weakSubjects.join(", ")}`;box.append(weak);}
       clearSavedAttempt();attempt=null;
@@ -176,8 +223,35 @@
   }
   async function loadHistory(){
     const root=$("history-list");root.replaceChildren();
-    try{const result=await api("/api/exams/history");if(!result.attempts.length){root.textContent="No completed exams yet.";return;}result.attempts.forEach(item=>{const row=document.createElement("div");row.className="attempt";row.textContent=`${item.mode==="entrance"?"Entrance mock":`Grade ${item.grade} ${item.subject||"practice"}`} · ${item.score}/${item.total} · ${item.submitted_at?"Completed":"In progress"}`;root.append(row);});}
-    catch{root.textContent="Sign in to save and view exam history.";}
+    let local=[];
+    try{local=await window.MinaOffline.listOfflineExamResults();}catch{}
+    try{
+      const result=await api("/api/exams/history");
+      const rows=[...local.map(item=>({...item,localOnly:true})),...result.attempts];
+      if(!rows.length){root.textContent="No completed exams yet.";return;}
+      rows.forEach(item=>{const row=document.createElement("div");row.className="attempt";row.textContent=`${item.localOnly?"Device-only offline practice":item.mode==="entrance"?"Entrance mock":`Grade ${item.grade} ${item.subject||"practice"}`} · ${item.score}/${item.total} · ${item.localOnly?"Saved on this device":item.submitted_at?"Completed":"In progress"}`;root.append(row);});
+    } catch {
+      if(!local.length){root.textContent="Sign in to load account exam history. Downloaded offline results are kept on this device.";return;}
+      local.forEach(item=>{const row=document.createElement("div");row.className="attempt";row.textContent=`Device-only offline practice · ${item.mode==="entrance"?"Entrance set":`Grade ${item.grade} ${item.subject||"practice"}`} · ${item.score}/${item.total} · Saved on this device`;root.append(row);});
+    }
+  }
+  async function renderOfflineDownloads() {
+    const root=$("offline-exam-downloads");root.replaceChildren();
+    try {
+      const items=(await window.MinaOffline.listOfflineDownloads()).filter(item=>item.type==="question-set" || item.type==="exam-result");
+      if(!items.length){root.textContent="No offline question sets or device-only results yet.";return;}
+      items.forEach(item=>{
+        const row=document.createElement("div");row.className="attempt";
+        const label=document.createElement("span");label.textContent=`${item.title} · ${(item.bytes/1024/1024).toFixed(1)} MB`;
+        const remove=document.createElement("button");remove.type="button";remove.className="secondary";remove.textContent="Remove";
+        remove.onclick=async()=>{
+          remove.disabled=true;
+          try{await window.MinaOffline.removeOfflineDownload(item.resourceKey);await renderOfflineDownloads();await loadHistory();}
+          catch(error){label.textContent=`${item.title} · ${error.message}`;remove.disabled=false;}
+        };
+        row.append(label,remove);root.append(row);
+      });
+    } catch(error){root.textContent=error.message;}
   }
   async function loadEducator(){
     try{const account=await api("/api/account/data");if(!["teacher","question_reviewer","educator","admin"].includes(account.role))return;
@@ -265,13 +339,32 @@
     try{
       if(pendingSaved && !window.confirm("Starting a new session replaces the previous resume position on this device. Its server record is not deleted. Continue?"))return;
       const mode=$("mode").value,count=mode==="entrance"?60:Number($("question-count").value);
-      const fresh=await api("/api/exams",{method:"POST",body:JSON.stringify({...filters(),mode,questionCount:count})});
+      const selected={...filters(),mode};
+      let cached=null;
+      try{cached=await window.MinaOffline.getOfflineQuestionSet(selected,count);}catch{}
+      let fresh;
+      if(cached?.questions?.length>=count) {
+        fresh={attemptId:`offline-${crypto.randomUUID()}`,startedAt:new Date().toISOString(),mode,total:count,
+          availableCount:cached.questions.length,timerSeconds:mode==="entrance"?60:null,
+          questions:cached.questions.slice(0,count),localOnly:true,selection:selected};
+      } else if(!navigator.onLine) {
+        throw new Error("No matching downloaded question set is available. Connect to download reviewed questions first.");
+      } else {
+        try {fresh=await api("/api/exams",{method:"POST",body:JSON.stringify({...filters(),mode,questionCount:count})});}
+        catch(error) {
+          cached=await window.MinaOffline.getOfflineQuestionSet(selected,count);
+          if(!cached?.questions?.length)throw error;
+          fresh={attemptId:`offline-${crypto.randomUUID()}`,startedAt:new Date().toISOString(),mode,total:count,
+            availableCount:cached.questions.length,timerSeconds:mode==="entrance"?60:null,
+            questions:cached.questions.slice(0,count),localOnly:true,selection:selected};
+        }
+      }
       if(fresh.total!==count)throw new Error(`This session requires exactly ${count} questions.`);
       attempt=fresh;selection={...filters(),mode,questionCount:count,returnTo:new URL($("return-to-learning").href).pathname+new URL($("return-to-learning").href).search};pendingSaved=null;
       $("resume-notice").hidden=true;answers={};position=0;remainingByQuestion={};deadlinesByQuestion={};correctByQuestion={};practiceFeedback={};submitting=false;transitioning=false;
       clearSavedAttempt();$("submit-exam").disabled=false;$("setup").hidden=true;$("exam").hidden=false;renderQuestion();saveAttemptState();
     }
-    catch(e){$("bank-status").textContent=e.status===401?"Sign in before starting an exam.":e.message;}
+    catch(e){$("bank-status").textContent=e.status===401?"Sign in before starting an online exam.":e.message;}
     finally {
       starting=false;controls.forEach((control,index)=>{control.disabled=disabled[index];});
       const required=$("mode").value==="entrance"?60:Number($("question-count").value);
@@ -301,7 +394,62 @@
   }
   $("resume-saved").onclick=()=>{if(restoreAttemptState(true)){pendingSaved=null;showRestoredAttempt();configureMode();}};
   configureMode();
-  async function initializeAccount(){try{const status=await api("/api/account/status");if(!status.signedIn){$("history-list").textContent="Sign in to save exam results."; $("saved-questions").textContent="Sign in to view saved questions."; return;}await Promise.all([loadHistory(),loadBookmarks(),loadEducator()]);}catch{}}
+  async function initializeAccount(){
+    await loadBookmarks();
+    try {
+      const status=await api("/api/account/status");
+      if(!status.signedIn){$("history-list").textContent="Sign in to save account exam history. Downloaded offline results remain on this device.";return;}
+      await syncOfflineResults(status.userId);
+      await Promise.all([loadHistory(),loadEducator()]);
+    } catch {await loadHistory();}
+  }
+  async function syncOfflineResults(expectedUserId) {
+    if(!expectedUserId || !window.MinaOffline.getOfflineOwner().startsWith("account:"))return;
+    const results=await window.MinaOffline.listOfflineExamResults();
+    if(!results.length)return;
+    const ownerId=window.MinaOffline.getOfflineOwner().slice("account:".length);
+    if(ownerId!==expectedUserId)return;
+    try {
+      await api("/api/account/data/learning/offline-results",{
+        method:"POST",body:JSON.stringify({expectedUserId,results}),
+      });
+      $("offline-download-status").textContent=`${results.length} device-only result${results.length===1?"":"s"} synced to your account. Offline scores remain labeled as local practice.`;
+    } catch(error) {
+      $("offline-download-status").textContent=`Offline results remain on this device. Account sync can be retried when connected: ${error.message}`;
+    }
+  }
   initializeAccount();
-  async function loadBookmarks(){try{const result=await api("/api/questions/bookmarks");const root=$("saved-questions");root.replaceChildren();result.questions.forEach(q=>{const item=document.createElement("p");item.textContent=`${q.subject}: ${q.prompt}`;root.append(item);});if(!result.questions.length)root.textContent="No saved questions yet.";}catch{}}
+  async function loadBookmarks(){
+    const root=$("saved-questions");root.replaceChildren();
+    const local=window.MinaOffline.readBookmarks();
+    try {
+      const result=await api("/api/questions/bookmarks");
+      const rows=[...local,...result.questions.filter(question=>!local.some(saved=>String(saved.id)===String(question.id)))];
+      if(!rows.length){root.textContent="No saved questions yet.";return;}
+      rows.forEach(question=>{const item=document.createElement("p");item.textContent=`${question.subject}: ${question.prompt}${local.some(saved=>String(saved.id)===String(question.id))?" · saved on this device":""}`;root.append(item);});
+    } catch {
+      if(!local.length){root.textContent="Saved account questions require internet. Device-saved questions remain available here.";return;}
+      local.forEach(question=>{const item=document.createElement("p");item.textContent=`${question.subject}: ${question.prompt} · saved on this device`;root.append(item);});
+    }
+  }
+
+  async function downloadQuestionSet() {
+    const button=$("download-offline"),status=$("offline-download-status");
+    button.disabled=true;status.textContent="Downloading reviewed questions…";
+    const mode=$("mode").value,limit=mode==="entrance"?60:Number($("question-count").value);
+    const selection={...filters(),mode};
+    const params=new URLSearchParams({...Object.fromEntries(Object.entries(filters()).filter(([,value])=>value!==""&&value!=null)),mode,limit:String(limit)});
+    try {
+      if(!navigator.onLine)throw new Error("Connect to the internet to download a question set.");
+      const data=await api(`/api/questions/offline-download?${params}`);
+      await window.MinaOffline.saveOfflineQuestionSet(selection,limit,data.questions);
+      status.textContent=`${data.questions.length} reviewed questions saved for offline practice on this device. Offline scores are not official exam results.`;
+      await renderOfflineDownloads();updateCount();
+    } catch(error){status.textContent=error.message;}
+    finally{button.disabled=false;}
+  }
+  $("download-offline").addEventListener("click",downloadQuestionSet);
+  window.addEventListener("mina:offline-change",renderOfflineDownloads);
+  window.addEventListener("online",()=>initializeAccount());
+  renderOfflineDownloads();
 })();

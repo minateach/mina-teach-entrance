@@ -607,8 +607,10 @@ async function checkAssistantStatus() {
     setStatus(
       "error",
       "Status unavailable",
-      "Could not check tutor status",
-      error.message || "Please check your connection. You can try sending a question again."
+      navigator.onLine ? "Could not check tutor status" : "AI Tutor needs internet",
+      navigator.onLine
+        ? error.message || "Please check your connection. You can try sending a question again."
+        : "The AI Tutor works online only. Your saved conversations remain on this device; reconnect to send a question."
     );
   }
   updateSendButton();
@@ -786,7 +788,10 @@ async function sendMessage(rawMessage, isRetry = false) {
     }
   } catch (error) {
     retryMessage = messageText;
-    retryError = error.message || "Please check your connection and try again.";
+    const offline = !navigator.onLine || error instanceof TypeError;
+    retryError = offline
+      ? "The online AI Tutor could not connect. Your message remains in this conversation on this device; reconnect to retry."
+      : error.message || "Please check your connection and try again.";
     if (error.code === "SETUP_REQUIRED") providerConfigured = false;
     if (error.code === "GEMINI_GROUNDING_LIMIT" || error.code === "GEMINI_RATE_LIMIT") {
       setStatus("error", "Search limit reached", "Google Search or Gemini limit reached", retryError);
@@ -800,7 +805,7 @@ async function sendMessage(rawMessage, isRetry = false) {
       setStatus(
         providerConfigured === false ? "missing" : "error",
         providerConfigured === false ? "Tutor unavailable" : "Connection issue",
-        providerConfigured === false ? "The tutor is not connected yet" : "The tutor could not answer",
+        providerConfigured === false ? "The tutor is not connected yet" : offline ? "AI Tutor needs internet" : "The tutor could not answer",
         retryError
       );
     }
