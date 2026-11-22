@@ -126,7 +126,8 @@ async function renderOfflineDownloads() {
     if(!downloads.length){box.append(node("p","No offline downloads yet. Open a lesson or practice page while online to save content.","muted"));return;}
     downloads.forEach(item=>{
       const row=node("div",undefined,"saved-chip");
-      const message=node("p",`${(item.bytes/1024/1024).toFixed(1)} MB · saved on this device`,"muted");
+      const updated=Number.isFinite(Date.parse(item.updatedAt))?new Date(item.updatedAt).toLocaleString():"date unavailable";
+      const message=node("p",`${(item.bytes/1024/1024).toFixed(1)} MB · saved ${updated} · may be out of date; reconnect and download again to refresh`,"muted");
       const metadata=item.data || {};
       const open=item.type==="lesson"
         ? link(item.title,lessonUrl({id:metadata.id,grade:metadata.grade,subject:metadata.subject,language:metadata.language}))

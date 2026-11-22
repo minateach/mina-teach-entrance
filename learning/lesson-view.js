@@ -86,8 +86,9 @@ export function renderLesson({root,lesson,course,store,changed}) {
     try {
       const record=await makeOfflineLessonDownload({id:lesson.id,grade:lesson.grade,subject:lesson.subject,language:lesson.language});
       const missing=record.data?.missingAssets || [];
-      offlineStatus.textContent=`Available offline · ${(record.bytes/1024/1024).toFixed(1)} MB stored on this device.${missing.length?` These linked resources still need internet: ${missing.join(", ")}.`:" All available diagrams were included."}`;
-      download.textContent="Downloaded for offline ✓";removeDownload.hidden=false;
+       const savedAt=Number.isFinite(Date.parse(record.updatedAt))?new Date(record.updatedAt).toLocaleString():"date unavailable";
+       offlineStatus.textContent=`Available offline · ${(record.bytes/1024/1024).toFixed(1)} MB stored on this device. Saved ${savedAt}; this copy may be out of date, so reconnect and download again to refresh.${missing.length?` These linked resources still need internet: ${missing.join(", ")}.`:" All available diagrams were included."}`;
+       download.textContent="Refresh offline copy";removeDownload.hidden=false;
       window.dispatchEvent(new Event("mina:offline-change"));
     } catch(error) {offlineStatus.textContent=error.message;}
     finally {download.disabled=false;}
@@ -100,7 +101,7 @@ export function renderLesson({root,lesson,course,store,changed}) {
   });
   removeDownload.hidden=true;
   getOfflineDownload(downloadKey).then(record=>{
-    if(record){download.textContent="Downloaded for offline ✓";const missing=record.data?.missingAssets || [];offlineStatus.textContent=`Available offline · ${(record.bytes/1024/1024).toFixed(1)} MB stored on this device.${missing.length?` Some linked resources still need internet: ${missing.join(", ")}.`:" All available diagrams were included."}`;removeDownload.hidden=false;}
+   if(record){download.textContent="Refresh offline copy";const missing=record.data?.missingAssets || [];const savedAt=Number.isFinite(Date.parse(record.updatedAt))?new Date(record.updatedAt).toLocaleString():"date unavailable";offlineStatus.textContent=`Available offline · ${(record.bytes/1024/1024).toFixed(1)} MB stored on this device. Saved ${savedAt}; this copy may be out of date, so reconnect and download again to refresh.${missing.length?` Some linked resources still need internet: ${missing.join(", ")}.`:" All available diagrams were included."}`;removeDownload.hidden=false;}
   }).catch(error=>{offlineStatus.textContent=error.message;});
   const practice=makeButton("Start practice",async()=>{
     practice.disabled=true;

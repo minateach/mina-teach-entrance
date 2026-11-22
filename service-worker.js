@@ -1,4 +1,4 @@
-const CACHE_NAME = "mina-teach-shell-v5";
+const CACHE_NAME = "mina-teach-shell-v6";
 const SHELL = [
   "/offline.html",
   "/",
@@ -6,6 +6,8 @@ const SHELL = [
   "/learning/",
   "/learning/styles.css",
   "/learning/library.css",
+  "/learning/analytics.css",
+  "/learning/analytics.js",
   "/learning/dashboard.js",
   "/learning/lesson-view.js",
   "/learning/learning-state.js",

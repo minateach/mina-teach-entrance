@@ -21,6 +21,36 @@ try {
   await navigate("/");
   await waitFor("navigator.serviceWorker?.controller && document.getElementById('offline-connection-status')");
   await evaluate("navigator.serviceWorker.ready");
+  const scopeCheck=await evaluate(`(async()=>{
+    const store=await import("/learning/offline-store.js");
+    const owner="account:user_offlineTest";
+    store.setOfflineOwner(owner);
+    await store.saveOfflineDownload({owner,key:"scope-fixture",type:"lesson",title:"Account-only fixture",data:{id:"private-fixture"}});
+    const accountHas=(await store.listOfflineDownloads(owner)).some(item=>item.resourceKey==="scope-fixture");
+    store.setOfflineOwner("guest");
+    const guestHas=(await store.listOfflineDownloads()).some(item=>item.resourceKey==="scope-fixture");
+    store.setOfflineOwner(owner);
+    const removable=await store.listOfflineDownloads();
+    await store.removeOfflineDownload("scope-fixture",owner);
+    store.setOfflineOwner("guest");
+    return {accountHas,guestHas,removed:!(await store.listOfflineDownloads(owner)).some(item=>item.resourceKey==="scope-fixture")};
+  })()`);
+  assert.deepEqual(scopeCheck,{accountHas:true,guestHas:false,removed:true},"downloads are partitioned by account and removable");
+  const limitCheck=await evaluate(`(async()=>{
+    const store=await import("/learning/offline-store.js");
+    store.setOfflineOwner("guest");
+    const db=await new Promise((resolve,reject)=>{const request=indexedDB.open("mina-teach-offline");request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)});
+    const tx=db.transaction("downloads","readwrite");
+    tx.objectStore("downloads").put({key:"guest::capacity-fixture",owner:"guest",resourceKey:"capacity-fixture",type:"lesson",title:"Capacity fixture",bytes:40*1024*1024,responses:{},data:{}});
+    await new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error)});
+    db.close();
+    let rejected=false;
+    try{await store.saveOfflineDownload({key:"capacity-overflow",type:"lesson",data:{content:"x"}})}
+    catch(error){rejected=error.message.includes("Offline storage is full")}
+    await store.removeOfflineDownload("capacity-fixture");
+    return rejected;
+  })()`);
+  assert.equal(limitCheck,true,"the per-account storage ceiling rejects a new item without clearing existing downloads");
 
   await navigate("/learning/?grade=10&subject=History&language=en",
     'document.querySelector(".history-lesson-link")');
@@ -29,6 +59,34 @@ try {
   const lessonUrl=await evaluate("location.pathname+location.search");
   await evaluate('document.querySelector(".lesson-page button").textContent.includes("Save lesson") && [...document.querySelectorAll(".lesson-page button")].find(button=>button.textContent.includes("Download for offline"))?.click()');
   await waitFor('document.querySelector(".lesson-page").innerText.includes("Available offline")');
+  await evaluate(`(async()=>{
+    const lessonId=new URL(location.href).searchParams.get("lesson");
+    const key=\`guest::lesson:10:en:\${lessonId}\`;
+    const db=await new Promise((resolve,reject)=>{const request=indexedDB.open("mina-teach-offline");request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)});
+    const tx=db.transaction("downloads","readwrite"),objectStore=tx.objectStore("downloads");
+    const record=await new Promise((resolve,reject)=>{const request=objectStore.get(key);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)});
+    record.updatedAt="2020-01-01T00:00:00.000Z";objectStore.put(record);
+    await new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error)});db.close();
+  })()`);
+  await command("Page.reload");
+  await waitFor('document.getElementById("lesson-page") && document.querySelector(".lesson-page").textContent.includes("may be out of date")');
+  assert.match(await evaluate('document.querySelector(".lesson-page").textContent'),/2020/,"offline lesson displays the cached copy date");
+  await evaluate('[...document.querySelectorAll(".lesson-page button")].find(button=>button.textContent.includes("Refresh offline copy"))?.click()');
+  await waitFor('document.querySelector(".lesson-page").textContent.includes("Saved") && document.querySelector(".lesson-page").textContent.includes("may be out of date")');
+  await waitFor(`(async()=>{
+    const lessonId=new URL(location.href).searchParams.get("lesson");
+    const db=await new Promise((resolve,reject)=>{const request=indexedDB.open("mina-teach-offline");request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)});
+    const record=await new Promise((resolve,reject)=>{const request=db.transaction("downloads").objectStore("downloads").get(\`guest::lesson:10:en:\${lessonId}\`);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)});
+    db.close();return Date.parse(record?.updatedAt)>Date.parse("2020-01-01T00:00:00.000Z");
+  })()`);
+  await evaluate('[...document.querySelectorAll(".lesson-page button")].find(button=>button.textContent.includes("Remove offline copy"))?.click()');
+  await waitFor('document.querySelector(".lesson-page").textContent.includes("Offline copy removed")');
+  assert.equal(await evaluate(`(async()=>{
+    const lessonId=new URL(location.href).searchParams.get("lesson");
+    const db=await new Promise((resolve,reject)=>{const request=indexedDB.open("mina-teach-offline");request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)});
+    const record=await new Promise((resolve,reject)=>{const request=db.transaction("downloads").objectStore("downloads").get(\`guest::lesson:10:en:\${lessonId}\`);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)});
+    db.close();return !!record;
+  })()`),false,"the lesson removal control deletes only its offline copy");
   assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true,"lesson view fits Android width");
   await navigate("/learning/?grade=10&language=en",
     '[...document.querySelectorAll(".course-card button")].some(button=>button.getAttribute("aria-label")==="Download Grade 10 History offline")');
@@ -44,6 +102,8 @@ try {
   assert.equal(browser.requests.filter(url=>new URL(url).pathname.startsWith("/api/")).length,apiRequestCount,"manual Offline Mode opens the downloaded lesson without API requests");
   await evaluate('const t=document.getElementById("offline-mode-toggle");t.checked=false;t.dispatchEvent(new Event("change",{bubbles:true}))');
   await setOffline(true);
+  await navigate("/learning/?grade=10&language=en",'document.querySelectorAll(".course-card").length===18');
+  assert.equal(await evaluate('document.querySelectorAll(".course-card").length'),18,"offline dashboard starts from its cached catalog and shell");
   await navigate(lessonUrl,'document.getElementById("lesson-page") && document.querySelector(".lesson-page h2")');
   assert.match(await evaluate('document.getElementById("offline-connection-status").textContent'),/Offline/);
   assert.match(await evaluate('document.querySelector(".lesson-page").textContent'),/Complete lesson notes|Introduction/);
@@ -92,12 +152,36 @@ try {
   assert.equal(await evaluate('(async()=> (await window.MinaOffline.listOfflineExamResults()).length)()'),1,"offline exam result persisted");
   assert.equal(await evaluate('(async()=> (await window.MinaOffline.listOfflineDownloads()).some(item=>item.type==="question-set"))()'),true);
   assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true,"offline exam results fit Android width");
+  const removeQuestionSet=await evaluate(`(()=>{
+    const row=[...document.querySelectorAll("#offline-exam-downloads .attempt")].find(item=>item.textContent.includes("10 questions"));
+    if(!row)return false;
+    row.querySelector("button")?.click();return true;
+  })()`);
+  assert.equal(removeQuestionSet,true,"a downloaded question set has a removal control");
+  await waitFor('![...document.querySelectorAll("#offline-exam-downloads .attempt")].some(item=>item.textContent.includes("10 questions"))');
   await setOffline(false);
+  await browser.intercept(request=>{
+    if(new URL(request.url).pathname==="/api/account/status")return {body:{signedIn:true,userId:"user_offlineUserB"}};
+    return null;
+  },["*api/account/status*"]);
+  await evaluate('window.dispatchEvent(new Event("online"))');
+  await waitFor('window.MinaOffline.getOfflineOwner()==="account:user_offlineUserB" && document.getElementById("bank-status").textContent.includes("account changed")');
+  assert.equal(await evaluate('document.getElementById("results").hidden'),true,"account changes hide the previous learner’s active result");
+  assert.match(await evaluate('document.getElementById("offline-exam-downloads").textContent'),/No offline question sets/,"the new account does not see previous local downloads");
+  await browser.stopIntercept();
+  await command("Page.reload");
+  await waitFor('document.getElementById("mode") && window.MinaOffline?.getOfflineOwner?.()==="guest"');
+  assert.equal(await evaluate('(async()=> (await window.MinaOffline.listOfflineExamResults()).length)()'),1,"switching account did not delete the prior guest result");
   await navigate(examUrl,'document.getElementById("mode")');
   await evaluate('document.getElementById("mode").value="entrance";document.getElementById("mode").dispatchEvent(new Event("change"))');
   await waitFor('document.getElementById("bank-status").textContent.includes("reviewed questions available")');
   await evaluate('document.getElementById("download-offline").click()');
   await waitFor('document.getElementById("offline-download-status").textContent.includes("60 reviewed questions saved")');
+  const savedEntranceSet=await evaluate(`(async()=>{
+    const record=await window.MinaOffline.getOfflineQuestionSet({grade:9,stream:"natural",subject:"English",topic:"",difficulty:"",mode:"entrance"},60);
+    return {owner:window.MinaOffline.getOfflineOwner(),count:record?.questions?.length||0};
+  })()`);
+  assert.deepEqual(savedEntranceSet,{owner:"guest",count:60},"entrance questions are stored under the active local owner before going offline");
   const entranceUrl=await evaluate("location.pathname+location.search");
   await setOffline(true);
   await navigate(entranceUrl,'document.getElementById("start-exam").disabled===false && document.getElementById("bank-status").textContent.includes("Offline:")');

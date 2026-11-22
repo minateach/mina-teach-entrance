@@ -384,7 +384,7 @@ export async function saveOfflineQuestionSet(selection, limit, questions, owner 
 
 export async function getOfflineQuestionSet(selection, limit, owner = getOfflineOwner()) {
   const record = await getOfflineDownload(questionSetKey(selection, limit), owner);
-  return record?.data || null;
+  return record?.data ? { ...record.data, offlineUpdatedAt: record.updatedAt } : null;
 }
 
 export async function saveOfflineExamResult(result, owner = getOfflineOwner()) {
@@ -407,6 +407,6 @@ export async function listOfflineExamResults(owner = getOfflineOwner()) {
   }
 }
 
-export function offlineDraftKey() {
-  return `mina-teach-active-exam-v2:${encodeURIComponent(getOfflineOwner())}`;
+export function offlineDraftKey(owner = getOfflineOwner()) {
+  return `mina-teach-active-exam-v2:${encodeURIComponent(safeOwner(owner))}`;
 }

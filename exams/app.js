@@ -3,6 +3,8 @@
   const filters = () => ({ grade: Number($("grade").value), stream: $("stream").value, subject: $("subject").value, topic: $("topic").value.trim(), difficulty: $("difficulty").value });
   let available = 0, attempt = null, position = 0, answers = {}, chosen = null, timerId = null, remaining = 60, editingQuestionId = null, submitting = false, transitioning = false;
   let remainingByQuestion = {}, deadlinesByQuestion = {}, correctByQuestion = {}, practiceFeedback = {};
+  const offlineOwnerAtLoad=window.MinaOffline.getOfflineOwner();
+  let accountScopeChanged=false;
   const examStorageKey="mina-teach-active-exam-v1";
   let countVersion=0,initialFilterError="",selection=null,pendingSaved=null,starting=false,invalidSavedState=false;
   async function api(url, options={}) {
@@ -17,6 +19,12 @@
   function query() { const params = new URLSearchParams(Object.entries(filters()).filter(([,v])=>v!==""&&v!=null)); return params.toString(); }
   async function updateCount() {
     const version=++countVersion;
+    if(accountScopeChanged) {
+      countVersion++;
+      $("start-exam").disabled=true;
+      $("bank-status").textContent="Your account changed. Reload this page to load the new account’s private downloads safely.";
+      return;
+    }
     $("start-exam").disabled=true; $("bank-status").textContent="Checking reviewed question count…";
     if(initialFilterError){$("bank-status").textContent=initialFilterError;return;}
     try {
@@ -33,7 +41,8 @@
         const cached=await window.MinaOffline.getOfflineQuestionSet({...filters(),mode},required);
         if(cached?.questions?.length>=required) {
           available=cached.questions.length;
-          $("bank-status").textContent=`Offline: ${available} downloaded reviewed questions are ready for local practice. Scores stay on this device.`;
+          const savedAt=Number.isFinite(Date.parse(cached.offlineUpdatedAt))?new Date(cached.offlineUpdatedAt).toLocaleString():"date unavailable";
+          $("bank-status").textContent=`Offline: ${available} downloaded reviewed questions are ready for local practice. Scores stay on this device. Saved ${savedAt}; this set may be out of date, so reconnect and download again to refresh.`;
           $("start-exam").disabled=starting || available<required;
           $("offline-download-status").textContent="You can start this downloaded set without internet.";
           return;
@@ -43,13 +52,13 @@
     }
   }
   function saveAttemptState(){
-    if(!attempt)return;
-    try{localStorage.setItem(window.MinaOffline.offlineDraftKey(),JSON.stringify({attempt,selection,position,answers,remainingByQuestion,deadlinesByQuestion,correctByQuestion,practiceFeedback}));}catch{}
+    if(!attempt||accountScopeChanged||window.MinaOffline.getOfflineOwner()!==offlineOwnerAtLoad)return;
+    try{localStorage.setItem(window.MinaOffline.offlineDraftKey(offlineOwnerAtLoad),JSON.stringify({attempt,selection,position,answers,remainingByQuestion,deadlinesByQuestion,correctByQuestion,practiceFeedback}));}catch{}
   }
-  function clearSavedAttempt(){try{localStorage.removeItem(window.MinaOffline.offlineDraftKey());sessionStorage.removeItem(examStorageKey);}catch{}}
+  function clearSavedAttempt(){try{localStorage.removeItem(window.MinaOffline.offlineDraftKey(offlineOwnerAtLoad));sessionStorage.removeItem(examStorageKey);}catch{}}
   function restoreAttemptState(force=false){
     try{
-      const state=JSON.parse(localStorage.getItem(window.MinaOffline.offlineDraftKey())||sessionStorage.getItem(examStorageKey)||"null");
+      const state=JSON.parse(localStorage.getItem(window.MinaOffline.offlineDraftKey(offlineOwnerAtLoad))||sessionStorage.getItem(examStorageKey)||"null");
       if(!state?.attempt?.attemptId||!Array.isArray(state.attempt.questions)||!state.attempt.questions.length)return false;
       if(!state.attempt.questions.every(question=>question.id!=null && typeof question.prompt==="string" && typeof question.sourceKind==="string" && question.sourceKind.trim() && typeof question.sourceLabel==="string" && question.sourceLabel.trim() && Array.isArray(question.choices) && question.choices.length===4 && question.choices.every(choice=>typeof choice==="string"))) {
         pendingSaved=state;invalidSavedState=true;return false;
@@ -245,7 +254,8 @@
       if(!items.length){root.textContent="No offline question sets or device-only results yet.";return;}
       items.forEach(item=>{
         const row=document.createElement("div");row.className="attempt";
-        const label=document.createElement("span");label.textContent=`${item.title} · ${(item.bytes/1024/1024).toFixed(1)} MB`;
+        const savedAt=Number.isFinite(Date.parse(item.updatedAt))?new Date(item.updatedAt).toLocaleString():"date unavailable";
+        const label=document.createElement("span");label.textContent=`${item.title} · ${(item.bytes/1024/1024).toFixed(1)} MB · saved ${savedAt}; may be out of date`;
         const remove=document.createElement("button");remove.type="button";remove.className="secondary";remove.textContent="Remove";
         remove.onclick=async()=>{
           remove.disabled=true;
@@ -362,16 +372,21 @@
             questions:cached.questions.slice(0,count),localOnly:true,selection:selected};
         }
       }
+      if(accountScopeChanged||window.MinaOffline.getOfflineOwner()!==offlineOwnerAtLoad)throw new Error("Your account changed. Reload this page before continuing.");
       if(fresh.total!==count)throw new Error(`This session requires exactly ${count} questions.`);
       attempt=fresh;selection={...filters(),mode,questionCount:count,returnTo:new URL($("return-to-learning").href).pathname+new URL($("return-to-learning").href).search};pendingSaved=null;
       $("resume-notice").hidden=true;answers={};position=0;remainingByQuestion={};deadlinesByQuestion={};correctByQuestion={};practiceFeedback={};submitting=false;transitioning=false;
       clearSavedAttempt();$("submit-exam").disabled=false;$("setup").hidden=true;$("exam").hidden=false;renderQuestion();saveAttemptState();
     }
-    catch(e){$("bank-status").textContent=e.status===401?"Sign in before starting an exam.":e.message;}
+    catch(e){if(!accountScopeChanged)$("bank-status").textContent=e.status===401?"Sign in before starting an exam.":e.message;}
     finally {
-      starting=false;controls.forEach((control,index)=>{control.disabled=disabled[index];});
-      const required=$("mode").value==="entrance"?60:Number($("question-count").value);
-      $("start-exam").disabled=$("setup").hidden || !!initialFilterError || available<required;
+      starting=false;
+      if(accountScopeChanged){controls.forEach(control=>{control.disabled=true;});$("start-exam").disabled=true;}
+      else {
+        controls.forEach((control,index)=>{control.disabled=disabled[index];});
+        const required=$("mode").value==="entrance"?60:Number($("question-count").value);
+        $("start-exam").disabled=$("setup").hidden || !!initialFilterError || available<required;
+      }
     }
   };
   $("next").onclick=nextQuestion;
@@ -397,14 +412,31 @@
   }
   $("resume-saved").onclick=()=>{if(restoreAttemptState(true)){pendingSaved=null;showRestoredAttempt();configureMode();}};
   configureMode();
+  window.addEventListener("mina:offline-owner-changed",event=>{
+    if(event.detail?.owner===offlineOwnerAtLoad)return;
+    accountScopeChanged=true;
+    countVersion++;
+    attempt=null;pendingSaved=null;answers={};position=0;
+    clearInterval(timerId);timerId=null;
+    $("exam").hidden=true;$("results").hidden=true;$("results").replaceChildren();$("setup").hidden=false;
+    $("resume-notice").hidden=true;$("resume-saved").disabled=true;
+    $("start-exam").disabled=true;$("download-offline").disabled=true;
+    for(const id of ["grade","stream","subject","topic","mode","difficulty","question-count"])$(id).disabled=true;
+    $("bank-status").textContent="Your account changed. Reload this page to load the new account’s private downloads safely. The previous account’s saved practice remains intact.";
+  });
   async function initializeAccount(){
-    await loadBookmarks();
     try {
       const status=await api("/api/account/status");
-      if(!status.signedIn){$("history-list").textContent="Sign in to save account exam history. Downloaded offline results remain on this device.";return;}
+      const owner=status.signedIn&&status.userId?`account:${status.userId}`:"guest";
+      const previousOwner=window.MinaOffline.getOfflineOwner();
+      window.MinaOffline.setOfflineOwner(owner);
+      if(previousOwner!==owner)window.dispatchEvent(new CustomEvent("mina:offline-owner-changed",{detail:{owner}}));
+      await loadBookmarks();
+      await renderOfflineDownloads();
+      if(!status.signedIn||!status.userId){$("history-list").textContent="Sign in to save account exam history. Downloaded offline results remain on this device.";return;}
       await syncOfflineResults(status.userId);
       await Promise.all([loadHistory(),loadEducator()]);
-    } catch {await loadHistory();}
+    } catch {await loadBookmarks();await loadHistory();}
   }
   async function syncOfflineResults(expectedUserId) {
     if(!expectedUserId || !window.MinaOffline.getOfflineOwner().startsWith("account:"))return;
@@ -438,6 +470,7 @@
 
   async function downloadQuestionSet() {
     const button=$("download-offline"),status=$("offline-download-status");
+    const requestOwner=window.MinaOffline.getOfflineOwner();
     button.disabled=true;status.textContent="Downloading reviewed questions…";
     const mode=$("mode").value,limit=mode==="entrance"?60:Number($("question-count").value);
     const selection={...filters(),mode};
@@ -445,11 +478,13 @@
     try {
       if(!navigator.onLine)throw new Error("Connect to the internet to download a question set.");
       const data=await api(`/api/questions/offline-download?${params}`);
-      await window.MinaOffline.saveOfflineQuestionSet(selection,limit,data.questions);
-      status.textContent=`${data.questions.length} reviewed questions saved for offline practice on this device. Offline scores are not official exam results.`;
+       if(accountScopeChanged||window.MinaOffline.getOfflineOwner()!==requestOwner||requestOwner!==offlineOwnerAtLoad)throw new Error("Your account changed. Reload this page before downloading.");
+       const saved=await window.MinaOffline.saveOfflineQuestionSet(selection,limit,data.questions,requestOwner);
+       const savedAt=Number.isFinite(Date.parse(saved.updatedAt))?new Date(saved.updatedAt).toLocaleString():"date unavailable";
+       status.textContent=`${data.questions.length} reviewed questions saved for offline practice on this device at ${savedAt}. Re-download online to refresh this copy. Offline scores are not official exam results.`;
       await renderOfflineDownloads();updateCount();
     } catch(error){status.textContent=error.message;}
-    finally{button.disabled=false;}
+    finally{button.disabled=accountScopeChanged;}
   }
   $("download-offline").addEventListener("click",downloadQuestionSet);
   window.addEventListener("mina:offline-change",renderOfflineDownloads);

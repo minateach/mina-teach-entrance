@@ -60,6 +60,7 @@ window.MinaOffline = {
   saveOfflineExamResult,
   saveOfflineBookmarks,
   saveOfflineQuestionSet,
+  setOfflineOwner,
   offlineDraftKey,
   readBookmarks,
   toggleBookmark,
