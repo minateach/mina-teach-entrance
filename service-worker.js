@@ -1,4 +1,4 @@
-const CACHE_NAME = "mina-teach-shell-v6";
+const CACHE_NAME = "mina-teach-shell-v9";
 const SHELL = [
   "/offline.html",
   "/",
@@ -8,6 +8,8 @@ const SHELL = [
   "/learning/library.css",
   "/learning/analytics.css",
   "/learning/analytics.js",
+  "/learning/notifications.css",
+  "/learning/study-notifications.js",
   "/learning/dashboard.js",
   "/learning/lesson-view.js",
   "/learning/learning-state.js",
@@ -47,6 +49,25 @@ self.addEventListener("activate", event => {
       if (name.startsWith("mina-teach-shell-") && name !== CACHE_NAME) await caches.delete(name);
     }
     await self.clients.claim();
+  })());
+});
+
+self.addEventListener("notificationclick", event => {
+  event.notification.close();
+  let target="/learning/";
+  try {
+    const url=new URL(event.notification.data?.url||target,self.location.origin);
+    if(url.origin===self.location.origin&&["/learning/","/exams/"].includes(url.pathname))
+      target=url.pathname+url.search;
+  } catch {}
+  event.waitUntil((async()=>{
+    const windows=await self.clients.matchAll({type:"window",includeUncontrolled:true});
+    for(const client of windows) {
+      if(new URL(client.url).origin!==self.location.origin)continue;
+      if(typeof client.navigate==="function")await client.navigate(target);
+      return client.focus();
+    }
+    return self.clients.openWindow(target);
   })());
 });
 

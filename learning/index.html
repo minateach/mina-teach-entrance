@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="/learning/styles.css">
   <link rel="stylesheet" href="/learning/library.css">
   <link rel="stylesheet" href="/learning/analytics.css">
+  <link rel="stylesheet" href="/learning/notifications.css">
   <title>MINA TEACH AI | Learning dashboard</title>
 </head>
 <body>
@@ -87,6 +88,21 @@
         <form id="task-form"><label class="sr-only" for="task-input">Study task</label><input id="task-input" maxlength="120" placeholder="e.g. Review quadratic equations" required><button type="submit">Add task</button></form>
         <ul id="task-list" class="task-list"></ul>
       </aside>
+    </section>
+    <section id="study-notifications" class="panel saved-panel notification-panel" aria-labelledby="study-notifications-title">
+      <div class="section-heading"><div><p class="eyebrow">YOUR STUDY ROUTINE</p><h2 id="study-notifications-title">Study reminders and new-content notices</h2></div></div>
+      <p class="muted">Choose reminders and updates you want. Browser permission is requested only when you press the button below.</p>
+      <div class="notification-controls">
+        <label class="notification-choice"><input id="daily-reminder-enabled" type="checkbox"> Daily study reminder</label>
+        <label for="daily-reminder-time">Local reminder time</label>
+        <input id="daily-reminder-time" type="time" value="18:00" disabled>
+        <button id="notification-permission" type="button" class="button-secondary">Enable browser notifications</button>
+      </div>
+      <p id="daily-reminder-status" class="muted" role="status">Daily reminder is off.</p>
+      <p class="notification-limit-note">Reminders and content checks run while this page is open. Closing the app stops scheduled checks; background push is not configured. If browser permission is denied, change it in site settings. On iPhone or iPad, notifications may require adding Mina Teach AI to the Home Screen.</p>
+      <label class="notification-choice"><input id="content-notices-enabled" type="checkbox"> Notify me about new lessons and approved practice questions</label>
+      <p id="notifications-status" class="muted" role="status">Loading notification preferences…</p>
+      <ul id="content-notice-list" class="content-notice-list" aria-label="New published learning content"></ul>
     </section>
     <section class="panel saved-panel">
       <h2>Bookmarked topics</h2><div id="bookmarked-topics" class="saved-list"></div>

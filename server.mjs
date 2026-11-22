@@ -14,6 +14,14 @@ import { normalizeImageDataUrl } from "./server/image-processing.mjs";
 import { monthlyImageRequestCap, reserveImageAIRequest, recordSuccessfulImage, utcImageUsageMonth } from "./server/image-usage.mjs";
 import { handleImageStudioRequest } from "./server/image-studio.mjs";
 import {
+  MAX_STUDY_NOTICE_EVENTS,
+  PUBLISHED_STUDY_EVENTS_SQL,
+  consumeStudyNoticePoll,
+  normalizeStudyNotifications,
+  publicStudyNotice,
+  updateStudyNotifications,
+} from "./server/study-notifications.mjs";
+import {
   defaultMiniMaxChatModel,
   normalizeMiniMaxChatError,
   normalizeStudentMemory,
@@ -47,6 +55,7 @@ const allowedRecordTypes = new Set(["conversations", "learning", "preferences"])
 const chatRateWindows = new Map();
 const chatRateWindowMs = 60_000;
 const maxChatRequestsPerWindow = 30;
+const studyNotificationPolls = new Map();
 
 const languageNames = {
   auto: "the language used in the student's message",
@@ -829,7 +838,7 @@ function publicFilePath(pathname) {
   if (allowedTopLevelFiles.has(pathname)) return pathname.slice(1);
   if (pathname.startsWith("/assistant/")) return pathname.slice(1);
   if (pathname.startsWith("/image-studio/")) return pathname.slice(1);
-  if (new Set(["/learning/app.js", "/learning/styles.css", "/learning/library.css", "/learning/analytics.css", "/learning/analytics.js", "/learning/history-grade10.js", "/learning/dashboard.js", "/learning/learning-state.js", "/learning/lesson-view.js", "/learning/material-reader.js", "/learning/offline-store.js", "/learning/coverage.html", "/learning/coverage.js"]).has(pathname)) {
+  if (new Set(["/learning/app.js", "/learning/styles.css", "/learning/library.css", "/learning/analytics.css", "/learning/analytics.js", "/learning/notifications.css", "/learning/study-notifications.js", "/learning/history-grade10.js", "/learning/dashboard.js", "/learning/learning-state.js", "/learning/lesson-view.js", "/learning/material-reader.js", "/learning/offline-store.js", "/learning/coverage.html", "/learning/coverage.js"]).has(pathname)) {
     return pathname.slice(1);
   }
   return null;
@@ -1611,6 +1620,102 @@ app.delete("/api/questions/:id/bookmark", requireAuth, async (request, response)
   if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
   try { await pool.query("DELETE FROM mina_question_bookmarks WHERE user_id=$1 AND question_id=$2", [request.userId, request.params.id]); sendJson(response, 200, { deleted: true }); }
   catch { sendError(response, 500, "BOOKMARK_FAILED", "This saved question could not be removed."); }
+});
+
+async function lockStudyNotificationPreferences(client, userId) {
+  await client.query(
+    "INSERT INTO mina_user_records (user_id,record_type,data) VALUES ($1,'preferences','{}'::jsonb) ON CONFLICT (user_id,record_type) DO NOTHING",
+    [userId],
+  );
+  const result=await client.query(
+    "SELECT data FROM mina_user_records WHERE user_id=$1 AND record_type='preferences' FOR UPDATE",
+    [userId],
+  );
+  const data=result.rows[0]?.data;
+  return data&&typeof data==="object"&&!Array.isArray(data)?data:{};
+}
+
+app.get("/api/study-notifications/preferences",requireAuth,async(request,response)=>{
+  if(!isSameOrigin(request)){sendError(response,403,"CROSS_ORIGIN_BLOCKED","This request is not allowed.");return;}
+  try {
+    const result=await pool.query(
+      "SELECT data FROM mina_user_records WHERE user_id=$1 AND record_type='preferences'",
+      [request.userId],
+    );
+    sendJson(response,200,{notifications:normalizeStudyNotifications(result.rows[0]?.data?.studyNotifications)});
+  } catch {sendError(response,503,"NOTIFICATION_PREFERENCES_UNAVAILABLE","Your notification preferences could not be loaded.");}
+});
+
+app.put("/api/study-notifications/preferences",requireAuth,async(request,response)=>{
+  if(!isSameOrigin(request)){sendError(response,403,"CROSS_ORIGIN_BLOCKED","This request is not allowed.");return;}
+  let client;
+  try {
+    const input=await readJsonBody(request);
+    client=await pool.connect();
+    await client.query("BEGIN");
+    const data=await lockStudyNotificationPreferences(client,request.userId);
+    const notifications=updateStudyNotifications(data.studyNotifications,input);
+    const updated={...data,studyNotifications:notifications};
+    const serialized=JSON.stringify(updated);
+    if(Buffer.byteLength(serialized)>900_000) {
+      await client.query("ROLLBACK");
+      sendError(response,413,"ACCOUNT_DATA_LIMIT","Your notification preferences could not be saved because the account preferences are too large.");
+      return;
+    }
+    await client.query(
+      "UPDATE mina_user_records SET data=$2::jsonb,updated_at=NOW() WHERE user_id=$1 AND record_type='preferences'",
+      [request.userId,serialized],
+    );
+    await client.query("COMMIT");
+    sendJson(response,200,{saved:true,notifications});
+  } catch(error) {
+    if(client)await client.query("ROLLBACK").catch(()=>{});
+    sendError(response,error instanceof TypeError?400:503,
+      error instanceof TypeError?"INVALID_NOTIFICATION_PREFERENCES":"NOTIFICATION_PREFERENCES_UNAVAILABLE",
+      error instanceof TypeError?error.message:"Your notification preferences could not be saved.");
+  } finally {client?.release();}
+});
+
+app.get("/api/study-notifications/events",requireAuth,async(request,response)=>{
+  if(!isSameOrigin(request)){sendError(response,403,"CROSS_ORIGIN_BLOCKED","This request is not allowed.");return;}
+  const throttle=consumeStudyNoticePoll(studyNotificationPolls,request.userId);
+  if(!throttle.allowed) {
+    response.setHeader("Retry-After",String(throttle.retryAfterSeconds));
+    sendError(response,429,"NOTIFICATION_POLL_LIMIT","New-content checks are limited to once per minute.");
+    return;
+  }
+  let client;
+  try {
+    client=await pool.connect();
+    await client.query("BEGIN");
+    const data=await lockStudyNotificationPreferences(client,request.userId);
+    const notifications=normalizeStudyNotifications(data.studyNotifications);
+    if(!notifications.contentNoticesEnabled||!notifications.contentNoticesSince) {
+      await client.query("COMMIT");
+      sendJson(response,200,{events:[],limit:MAX_STUDY_NOTICE_EVENTS});
+      return;
+    }
+    const result=await client.query(PUBLISHED_STUDY_EVENTS_SQL,[
+      notifications.contentNoticesSince,
+      notifications.contentCursor?.at||null,
+      notifications.contentCursor?.key||"",
+    ]);
+    const events=result.rows.map(publicStudyNotice);
+    let updatedNotifications=notifications;
+    if(events.length) {
+      const lastEvent=events.at(-1);
+      updatedNotifications={...notifications,contentCursor:{at:lastEvent.publishedAt,key:lastEvent.eventKey}};
+      await client.query(
+        "UPDATE mina_user_records SET data=$2::jsonb,updated_at=NOW() WHERE user_id=$1 AND record_type='preferences'",
+        [request.userId,JSON.stringify({...data,studyNotifications:updatedNotifications})],
+      );
+    }
+    await client.query("COMMIT");
+    sendJson(response,200,{events,limit:MAX_STUDY_NOTICE_EVENTS});
+  } catch {
+    if(client)await client.query("ROLLBACK").catch(()=>{});
+    sendError(response,503,"STUDY_NOTICES_UNAVAILABLE","New published content could not be checked. Your preferences remain saved.");
+  } finally {client?.release();}
 });
 
 app.use(async (request, response) => {

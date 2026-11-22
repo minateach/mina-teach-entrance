@@ -1,7 +1,8 @@
 import {api,createStore,topicIsComplete} from "./learning-state.js";
 import {node,lessonUrl,courseUrl,practiceUrl,topicParams,renderLesson} from "./lesson-view.js";
-import {getOfflineStorageUsage,listOfflineDownloads,makeOfflineCourseDownload,makeOfflineGradeDownload,removeOfflineDownload} from "./offline-store.js";
+import {getOfflineOwner,getOfflineStorageUsage,listOfflineDownloads,makeOfflineCourseDownload,makeOfflineGradeDownload,removeOfflineDownload} from "./offline-store.js";
 import {buildStudentAnalytics} from "./analytics.js";
+import {initStudyNotifications} from "./study-notifications.js";
 
 const $=id=>document.getElementById(id);
 const store=createStore(message=>{$("sync-status").textContent=message;});
@@ -373,6 +374,7 @@ window.addEventListener("mina:offline-mode-change",event=>{
   if(!event.detail?.enabled)void store.retry();
 });
 await loadPage();
+initStudyNotifications({api,signedIn:store.signedIn,owner:getOfflineOwner()});
 if(store.signedIn) {
   try {
     const history=await api("/api/exams/history");

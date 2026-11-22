@@ -1,0 +1,11 @@
+.notification-panel{display:grid;gap:10px}
+.notification-panel .section-heading{margin-bottom:0}
+.notification-controls{display:grid;grid-template-columns:minmax(0,1fr) minmax(130px,180px) auto;align-items:center;gap:10px}
+.notification-controls label{font-size:13px;color:#33415e}
+.notification-controls input[type=time]{min-width:0;width:100%;padding:10px;border:1px solid #dce2ed;border-radius:9px;font:inherit}
+.notification-choice{display:flex!important;grid-column:1/-1;align-items:center;gap:9px;font-weight:650}
+.notification-choice input{width:18px;height:18px;margin:0}
+.notification-limit-note{margin:0;color:#687690;font-size:12px;line-height:1.6}
+.content-notice-list{margin:0;padding-left:22px;display:grid;gap:8px}
+.content-notice-list a{color:#214c93;font-weight:650}
+@media(max-width:760px){.notification-controls{grid-template-columns:1fr 1fr}.notification-controls button{grid-column:1/-1;width:100%}}
