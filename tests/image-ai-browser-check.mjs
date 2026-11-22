@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,21 +10,23 @@ if (!process.env.REPLIT_DEV_DOMAIN) throw new Error("REPLIT_DEV_DOMAIN is requir
 const origin = `https://${process.env.REPLIT_DEV_DOMAIN}`;
 const tempDirectory = await mkdtemp(join(tmpdir(), "mina-image-test-"));
 const imagePath = join(tempDirectory, "sample.png");
+const videoPath = join(tempDirectory, "sample.webm");
 const imageBytes = await sharp({
   create: { width: 320, height: 240, channels: 3, background: { r: 44, g: 113, b: 204 } },
 }).png().toBuffer();
 await sharp(imageBytes).png().toFile(imagePath);
+execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=blue:s=160x90:d=2", "-an", "-c:v", "libvpx", "-crf", "35", "-b:v", "150k", "-y", videoPath]);
 const imageDataUrl = `data:image/png;base64,${imageBytes.toString("base64")}`;
 const browser = await browserDriver();
 const { command, evaluate, waitFor } = browser;
 const assistantPayloads = [];
 const studioPayloads = [];
 
-async function setFile(selector) {
+async function setFile(selector, path = imagePath) {
   const { root } = await command("DOM.getDocument", { depth: -1 });
   const { nodeId } = await command("DOM.querySelector", { nodeId: root.nodeId, selector });
   assert.ok(nodeId, `Expected file input ${selector}`);
-  await command("DOM.setFileInputFiles", { files: [imagePath], nodeId });
+  await command("DOM.setFileInputFiles", { files: [path], nodeId });
 }
 
 try {
@@ -137,14 +140,15 @@ try {
 
   const videoSupported=await evaluate("Boolean((HTMLMediaElement.prototype.captureStream||HTMLMediaElement.prototype.mozCaptureStream)&&typeof MediaRecorder==='function'&&['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'].some(type=>MediaRecorder.isTypeSupported(type)))");
   if(videoSupported){
-    const generated=await evaluate(`(async()=>{const canvas=document.createElement('canvas');canvas.width=160;canvas.height=90;const ctx=canvas.getContext('2d'),stream=canvas.captureStream(8),recorder=new MediaRecorder(stream,{mimeType:'video/webm'}),chunks=[];recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};const stopped=new Promise(resolve=>recorder.onstop=()=>resolve(new Blob(chunks,{type:recorder.mimeType})));recorder.start(100);let frame=0;const draw=setInterval(()=>{ctx.fillStyle=frame++%2?'#2563eb':'#ef4444';ctx.fillRect(0,0,160,90)},100);await new Promise(resolve=>setTimeout(resolve,1600));clearInterval(draw);recorder.stop();const blob=await stopped;for(const track of stream.getTracks())track.stop();const transfer=new DataTransfer();transfer.items.add(new File([blob],'sample.webm',{type:'video/webm'}));const input=document.getElementById('videoFile');input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));return {bytes:blob.size,type:blob.type}})()`);
-    assert.ok(generated.bytes>0,"test video was created locally in the browser");
+    await setFile("#videoFile", videoPath);
     await waitFor('(Number.isFinite(document.getElementById("videoPreview").duration) && document.getElementById("videoPreview").duration>0) || document.getElementById("videoStatus").dataset.state==="error"');
-    const videoMetadata=await evaluate("JSON.stringify({duration:document.getElementById('videoPreview').duration,error:document.getElementById('videoPreview').error?.message,status:document.getElementById('videoStatus').textContent,source:document.getElementById('videoPreview').currentSrc.slice(0,40)})");
+    const videoMetadata=await evaluate("JSON.stringify({duration:document.getElementById('videoPreview').duration,error:document.getElementById('videoPreview').error?.message,status:document.getElementById('videoStatus').textContent,source:document.getElementById('videoPreview').src.slice(0,70),currentSource:document.getElementById('videoPreview').currentSrc.slice(0,70),file:document.getElementById('videoFile').files?.[0]?.name,type:document.getElementById('videoFile').files?.[0]?.type,size:document.getElementById('videoFile').files?.[0]?.size})");
     assert.ok(await evaluate('Number.isFinite(document.getElementById("videoPreview").duration) && document.getElementById("videoPreview").duration>0'),`generated test video could not load: ${videoMetadata}`);
     await evaluate("document.getElementById('videoTrimEnd').value='0.5';document.getElementById('videoTrimEnd').dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('trimVideo').click()");
-    await waitFor('!document.getElementById("downloadVideo").hidden');
-    assert.match(await evaluate("document.getElementById('videoStatus').textContent"),/Trim complete/,"offline video clip is exported in the browser");
+    await waitFor('!document.getElementById("downloadVideo").hidden || document.getElementById("videoStatus").dataset.state==="error"');
+    const trimStatus=await evaluate("document.getElementById('videoStatus').textContent");
+    assert.equal(await evaluate('!document.getElementById("downloadVideo").hidden'),true,`offline trim did not export: ${trimStatus}`);
+    assert.match(trimStatus,/Trim complete/,"offline video clip is exported in the browser");
   } else {
     assert.match(await evaluate("document.getElementById('videoStatus').textContent"),/does not support offline video trimming/);
   }
