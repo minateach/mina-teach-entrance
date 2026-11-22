@@ -9,6 +9,7 @@
   <link rel="apple-touch-icon" href="/assistant/app-icon-180.png">
   <link rel="stylesheet" href="/learning/styles.css">
   <link rel="stylesheet" href="/learning/library.css">
+  <link rel="stylesheet" href="/learning/analytics.css">
   <title>MINA TEACH AI | Learning dashboard</title>
 </head>
 <body>
@@ -103,6 +104,21 @@
     <section class="panel saved-panel" aria-labelledby="quiz-progress-title">
       <div class="section-heading"><div><p class="eyebrow">RESULTS</p><h2 id="quiz-progress-title">Quiz progress</h2></div></div>
       <div id="quiz-progress" class="muted" role="status">Sign in to load saved quiz results.</div>
+    </section>
+    <section class="panel saved-panel" aria-labelledby="student-insights-title">
+      <div class="section-heading"><div><p class="eyebrow">YOUR LEARNING</p><h2 id="student-insights-title">Performance and achievements</h2></div></div>
+      <p id="analytics-data-note" class="muted">Loading saved study and practice records…</p>
+      <p id="analytics-error" class="notice" role="status" hidden></p>
+      <div class="analytics-grid">
+        <article class="analytics-card"><h3>Past 7 days</h3><div id="weekly-summary"></div></article>
+        <article class="analytics-card"><h3>Past 30 days</h3><div id="monthly-summary"></div></article>
+      </div>
+      <div class="analytics-grid">
+        <article class="analytics-card"><h3>Subjects performing well</h3><div id="strong-subjects"></div></article>
+        <article class="analytics-card"><h3>Topics to revisit</h3><div id="practice-topics"></div></article>
+      </div>
+      <h3 class="analytics-subheading">Milestones</h3>
+      <div id="achievement-list" class="achievement-grid"></div>
     </section>
     <footer>MINA TEACH AI · Dhaloota beekumsa omishuudha.</footer>
   </main>

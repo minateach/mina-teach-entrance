@@ -23,6 +23,13 @@ test("pending merges preserve actual progress and honor removed saved lessons",(
   assert.deepEqual(merged.tasks.map(task=>task.text),["remote","local"]);
   assert.deepEqual(mergeLearning({tasks:[{text:"remove"}]},{removedTasks:["legacy:remove"]}).tasks,[]);
 });
+test("dated lesson completion activity is retained and deduplicated by earliest recorded completion",()=>{
+  const first={key:"lesson-one",grade:10,subject:"History",completedAt:"2026-11-01T10:00:00.000Z"};
+  const later={...first,completedAt:"2026-11-02T10:00:00.000Z"};
+  const merged=mergeLearning({completionEvents:[later]},{completionEvents:[first,{...first,key:"invalid",grade:8}]});
+  assert.deepEqual(merged.completionEvents,[first]);
+  assert.deepEqual(normalizeState({completionEvents:[first,{...first,completedAt:"bad"}]}).completionEvents,[first]);
+});
 test("guest completion, tasks, saves and bookmarks survive reload; write failures are explicit",async()=>{
   globalThis.localStorage=storage();globalThis.fetch=async()=>response({signedIn:false});
   const statuses=[];const store=createStore(text=>statuses.push(text));await store.initialize();

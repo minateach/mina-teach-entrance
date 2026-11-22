@@ -134,6 +134,9 @@ try {
   assert.equal(await evaluate('document.getElementById("remaining-count").textContent'),"5");
   assert.match(await evaluate('document.getElementById("topic-coverage-status").textContent'),/4 of 19 available topics studied/);
   assert.match(await evaluate('document.getElementById("quiz-progress").textContent'),/AI-authored practice/);
+  assert.match(await evaluate('document.getElementById("weekly-summary").innerText'),/Grade 10[\s\S]*History[\s\S]*1/);
+  assert.match(await evaluate('document.getElementById("monthly-summary").innerText'),/History/);
+  assert.match(await evaluate('document.getElementById("achievement-list").innerText'),/First lesson[\s\S]*Earned/);
   await evaluate('document.querySelector("#saved-lessons button").click()');
   await waitFor('document.getElementById("lesson-page")?.innerText.includes("Features of Capitalism")');
   await navigate("/learning/?grade=10&language=en");

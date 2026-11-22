@@ -1,12 +1,13 @@
 import {api,createStore,topicIsComplete} from "./learning-state.js";
 import {node,lessonUrl,courseUrl,practiceUrl,topicParams,renderLesson} from "./lesson-view.js";
 import {getOfflineStorageUsage,listOfflineDownloads,makeOfflineCourseDownload,makeOfflineGradeDownload,removeOfflineDownload} from "./offline-store.js";
+import {buildStudentAnalytics} from "./analytics.js";
 
 const $=id=>document.getElementById(id);
 const store=createStore(message=>{$("sync-status").textContent=message;});
 const root=$("subjects");
 let scope,catalog,course,renderVersion=0,libraryVersion=0,libraryOffset=0;
-let examHistory=[],examError="";
+let examHistory=[],topicOutcomes=[],examError="";
 const catalogs=new Map();
 function dashboardUrl() {
   return `/learning/?${new URLSearchParams({grade:String(scope?.grade || 9),language:scope?.language || "en",stream:$("stream").value || "natural"})}`;
@@ -34,7 +35,57 @@ function updateProgress() {
     ? `${studied} of ${topicKeys.length} available topics studied · ${topicKeys.length-studied} topics remaining.`
     : "Topic availability could not be confirmed.";
 }
-function changed() {updateProgress();renderSaved();renderResults();}
+function changed() {updateProgress();renderSaved();renderResults();renderAnalytics();}
+function appendCell(row,value,tag="td") {row.append(node(tag,String(value)));}
+function renderPeriodSummary(id,rows) {
+  const box=$(id);box.replaceChildren();
+  if(!rows.length){box.append(node("p","No dated lessons or completed practice in this period yet.","muted"));return;}
+  const wrapper=node("div",undefined,"analytics-table-wrap"),table=node("table",undefined,"analytics-table");
+  const head=node("tr");
+  for(const label of ["Grade","Subject","Lessons","Practice","Accuracy"])appendCell(head,label,"th");
+  const thead=node("thead");thead.append(head);table.append(thead);
+  const body=node("tbody");
+  rows.forEach(row=>{
+    const tr=node("tr");
+    appendCell(tr,row.grade===null?"All grades":`Grade ${row.grade}`);
+    appendCell(tr,row.subject);
+    appendCell(tr,row.lessonCount);
+    appendCell(tr,row.attemptCount);
+    appendCell(tr,row.accuracy===null?"—":`${Math.round(row.accuracy*100)}%`);
+    body.append(tr);
+  });
+  table.append(body);wrapper.append(table);box.append(wrapper);
+}
+function renderAnalytics() {
+  const analytics=buildStudentAnalytics({
+    now:Date.now(),completionEvents:store.state.completionEvents,completedLessons:store.state.completed,
+    completedTopics:store.state.completedTopics,practiceResults:store.state.practice,examAttempts:examHistory,topicOutcomes,
+  });
+  renderPeriodSummary("weekly-summary",analytics.periods.weekly);
+  renderPeriodSummary("monthly-summary",analytics.periods.monthly);
+  const note=$("analytics-data-note");
+  note.textContent="Summaries use saved lesson completions and completed practice or exam results from the past 7 and 30 days, grouped by grade and subject. Older lesson completions without a recorded date stay in all-time totals but cannot be assigned to a period.";
+  if(!store.signedIn)note.textContent+=" Signed-out results include only data saved on this device.";
+  const error=$("analytics-error");
+  error.hidden=!examError;
+  error.textContent=examError?`Some account exam data could not be loaded: ${examError} Device-saved activity remains available.`:"";
+
+  const strengths=$("strong-subjects");strengths.replaceChildren();
+  if(!analytics.strongSubjects.length)strengths.append(node("p","Not enough recent results yet. A subject is highlighted after at least 3 completed results and 80% accuracy.","muted"));
+  else analytics.strongSubjects.forEach(item=>strengths.append(node("p",`${item.grade===null?"All grades":`Grade ${item.grade}`} · ${item.subject} · ${Math.round(item.accuracy*100)}% across ${item.attemptCount} completed results`)));
+
+  const topics=$("practice-topics");topics.replaceChildren();
+  if(!analytics.topicsNeedingPractice.length)topics.append(node("p","No chapter-level results meet the review threshold in the past 30 days. Topic signals use completed reviewed exam questions; lesson-practice records contain total scores, not per-question answers.","muted"));
+  else analytics.topicsNeedingPractice.forEach(item=>topics.append(node("p",`${item.grade===null?"All grades":`Grade ${item.grade}`} · ${item.subject} · ${item.chapter} · ${Math.round(item.accuracy*100)}% correct (${item.correctCount}/${item.questionCount})`)));
+
+  const badges=$("achievement-list");badges.replaceChildren();
+  analytics.badges.forEach(badge=>{
+    const card=node("article",undefined,`achievement-card${badge.earned?" earned":""}`);
+    card.append(node("strong",badge.title),node("p",badge.description,"muted"));
+    const progress=node("progress");progress.max=badge.target;progress.value=Math.min(badge.value,badge.target);progress.setAttribute("aria-label",`${badge.title}: ${Math.min(badge.value,badge.target)} of ${badge.target}`);
+    card.append(progress,node("small",badge.earned?"Earned":`${badge.value} / ${badge.target}`,"muted"));badges.append(card);
+  });
+}
 function renderResults() {
   const box=$("quiz-progress");box.replaceChildren();
   const local=store.state.practice.filter(attempt=>attempt.grade===scope?.grade).slice(0,8);
@@ -258,6 +309,7 @@ async function loadPage(force=false) {
       } else renderCourse(params.get("chapter"));
     }
     updateProgress();renderSaved();renderTasks();renderResults();renderOfflineDownloads();
+    renderAnalytics();
     if(!inCourse)loadLibrary();
   } catch(error) {if(version!==renderVersion)return;errorView(error);updateProgress();}
 }
@@ -321,7 +373,11 @@ window.addEventListener("mina:offline-mode-change",event=>{
 });
 await loadPage();
 if(store.signedIn) {
-  try { examHistory=(await api("/api/exams/history")).attempts; }
+  try {
+    const history=await api("/api/exams/history");
+    examHistory=Array.isArray(history.attempts)?history.attempts:[];
+    topicOutcomes=Array.isArray(history.topicOutcomes)?history.topicOutcomes:[];
+  }
   catch(error){examError=error.message;}
-  renderResults();
+  renderResults();renderAnalytics();
 }

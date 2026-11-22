@@ -8,6 +8,7 @@ import { publishableKeyFromHost } from "@clerk/shared/keys";
 import { ReplitConnectors } from "@replit/connectors-sdk";
 import pg from "pg";
 import { createLearningCatalog, LearningInputError } from "./server/learning-catalog.mjs";
+import { getExamHistory } from "./server/student-analytics.mjs";
 import {materialProblem,materialsProblem} from "./server/lesson-materials.mjs";
 import { normalizeImageDataUrl } from "./server/image-processing.mjs";
 import { monthlyImageRequestCap, reserveImageAIRequest, recordSuccessfulImage, utcImageUsageMonth } from "./server/image-usage.mjs";
@@ -828,7 +829,7 @@ function publicFilePath(pathname) {
   if (allowedTopLevelFiles.has(pathname)) return pathname.slice(1);
   if (pathname.startsWith("/assistant/")) return pathname.slice(1);
   if (pathname.startsWith("/image-studio/")) return pathname.slice(1);
-  if (new Set(["/learning/app.js", "/learning/styles.css", "/learning/library.css", "/learning/history-grade10.js", "/learning/dashboard.js", "/learning/learning-state.js", "/learning/lesson-view.js", "/learning/material-reader.js", "/learning/offline-store.js", "/learning/coverage.html", "/learning/coverage.js"]).has(pathname)) {
+  if (new Set(["/learning/app.js", "/learning/styles.css", "/learning/library.css", "/learning/analytics.css", "/learning/analytics.js", "/learning/history-grade10.js", "/learning/dashboard.js", "/learning/learning-state.js", "/learning/lesson-view.js", "/learning/material-reader.js", "/learning/offline-store.js", "/learning/coverage.html", "/learning/coverage.js"]).has(pathname)) {
     return pathname.slice(1);
   }
   return null;
@@ -1518,8 +1519,7 @@ app.post("/api/exams/:id/submit", requireAuth, async (request, response) => {
 
 app.get("/api/exams/history", requireAuth, async (request, response) => {
   try {
-    const result = await pool.query("SELECT id,mode,grade,stream,subject,difficulty,score,total,started_at,submitted_at FROM mina_exam_attempts WHERE user_id=$1 ORDER BY started_at DESC LIMIT 100", [request.userId]);
-    sendJson(response, 200, { attempts: result.rows });
+    sendJson(response, 200, await getExamHistory(pool,request.userId));
   } catch { sendError(response, 500, "EXAM_HISTORY_FAILED", "Exam history could not be loaded."); }
 });
 

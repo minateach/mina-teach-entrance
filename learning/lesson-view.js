@@ -66,7 +66,12 @@ export function renderLesson({root,lesson,course,store,changed}) {
     const saved=store.toggle("saved",item);save.textContent=saved?"★ Saved lesson":"☆ Save lesson";changed();
   });
   const complete=makeButton(store.state.completed.includes(lesson.key)?"Completed ✓":"Mark complete",()=>{
-    if(!store.state.completed.includes(lesson.key))store.state.completed.push(lesson.key);
+    if(!store.state.completed.includes(lesson.key)) {
+      store.state.completed.push(lesson.key);
+      store.state.completionEvents.push({
+        key:lesson.key,grade:lesson.grade,subject:lesson.subject,completedAt:new Date().toISOString(),
+      });
+    }
     store.save();complete.textContent="Completed ✓";changed();
     updateTopicStatus();
   });

@@ -1,0 +1,16 @@
+.analytics-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:14px 0}
+.analytics-card{min-width:0;border:1px solid #e1e7f1;border-radius:12px;padding:14px;background:#fbfcff}
+.analytics-card h3,.analytics-subheading{margin:0 0 12px;color:#173d76}
+.analytics-card p{font-size:13px;line-height:1.55;overflow-wrap:anywhere}
+.analytics-table-wrap{max-width:100%;overflow-x:auto}
+.analytics-table{width:100%;border-collapse:collapse;font-size:13px}
+.analytics-table th,.analytics-table td{padding:9px 8px;border-bottom:1px solid #e2e8f1;text-align:start;white-space:nowrap}
+.analytics-table th{color:#4e5f7a;font-size:11px}
+.achievement-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
+.achievement-card{border:1px solid #dce4ef;border-radius:12px;padding:13px;background:#fff}
+.achievement-card.earned{border-color:#8db8e8;background:#f0f7ff}
+.achievement-card p{margin:8px 0;font-size:12px;line-height:1.5}
+.achievement-card progress{width:100%;height:10px;accent-color:#1d579e}
+.achievement-card small{display:block;margin-top:5px}
+.analytics-subheading{margin-top:22px}
+@media(max-width:640px){.analytics-grid{grid-template-columns:1fr}.analytics-card{padding:12px}.analytics-table{font-size:12px}.analytics-table th,.analytics-table td{padding:8px 6px}}

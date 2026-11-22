@@ -54,6 +54,10 @@ export function normalizeState(value={}) {
   return {...value,settings:{grade:"9",stream:"natural",language:"en",...value.settings},
     completed:[...new Set(list(value.completed).filter(item=>typeof item==="string"))],
     completedTopics:[...new Set(list(value.completedTopics).filter(item=>typeof item==="string"))],
+    completionEvents:list(value.completionEvents).filter(item=>item&&typeof item.key==="string"&&
+      item.key&&[9,10,11,12].includes(Number(item.grade))&&typeof item.subject==="string"&&item.subject.trim()&&
+      typeof item.completedAt==="string"&&Number.isFinite(Date.parse(item.completedAt)))
+      .slice(-500),
     saved:list(value.saved).filter(item=>item && typeof item.key==="string"),
     bookmarks:list(value.bookmarks).filter(item=>item && typeof item.key==="string"),
     tasks:list(value.tasks).filter(item=>item && typeof item.text==="string"),
@@ -63,6 +67,11 @@ export function normalizeState(value={}) {
 export function mergeLearning(remote,local) {
   const a=normalizeState(remote),b=normalizeState(local);
   const merge=(first,second,key)=>[...new Map([...first,...second].map(item=>[item[key],item])).values()];
+  const completionEvents=new Map();
+  for(const event of [...a.completionEvents,...b.completionEvents]) {
+    const existing=completionEvents.get(event.key);
+    if(!existing || Date.parse(event.completedAt)<Date.parse(existing.completedAt))completionEvents.set(event.key,event);
+  }
   const removedSaved=[...new Set([...a.removedSaved,...b.removedSaved])];
   const removedBookmarks=[...new Set([...a.removedBookmarks,...b.removedBookmarks])];
   const removedTasks=[...new Set([...a.removedTasks,...b.removedTasks])];
@@ -71,6 +80,8 @@ export function mergeLearning(remote,local) {
   return normalizeState({...a,...b,settings:{...a.settings,...b.settings},
     completed:[...new Set([...a.completed,...b.completed])],
     completedTopics:[...new Set([...a.completedTopics,...b.completedTopics])],
+    completionEvents:[...completionEvents.values()]
+      .sort((x,y)=>String(x.completedAt).localeCompare(String(y.completedAt))).slice(-500),
     saved:merge(a.saved,b.saved,"key").filter(item=>!removedSaved.includes(item.key)),
     bookmarks:merge(a.bookmarks,b.bookmarks,"key").filter(item=>!removedBookmarks.includes(item.key)),
     tasks,
