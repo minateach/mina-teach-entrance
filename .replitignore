@@ -1,1 +1,10 @@
 /generated-artifacts/
+/android/.gradle/
+/android/app/build/
+/android/build/
+/android/local.properties
+/android/android-keystore/
+/android/*.aab
+/android/*.apk
+/android/*.jks
+/android/*.keystore

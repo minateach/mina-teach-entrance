@@ -1,0 +1,43 @@
+{
+  "packageId": "com.minateach.minateachai",
+  "host": "mina-teach-entrance.replit.app",
+  "name": "MINA TEACH AI",
+  "launcherName": "MINA TEACH",
+  "display": "standalone",
+  "themeColor": "#123B70",
+  "themeColorDark": "#123B70",
+  "navigationColor": "#101D45",
+  "navigationColorDark": "#101D45",
+  "navigationDividerColor": "#101D45",
+  "navigationDividerColorDark": "#101D45",
+  "backgroundColor": "#F5F7FB",
+  "enableNotifications": false,
+  "startUrl": "/",
+  "iconUrl": "https://mina-teach-entrance.replit.app/assistant/app-icon-512.png",
+  "maskableIconUrl": "https://mina-teach-entrance.replit.app/assistant/app-icon-512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "./android-keystore/mina-teach-play-upload.jks",
+    "alias": "mina-teach-play-upload"
+  },
+  "appVersionName": "1.0.0",
+  "appVersionCode": 1,
+  "shortcuts": [],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://mina-teach-entrance.replit.app/manifest.webmanifest",
+  "fallbackType": "customtabs",
+  "features": {},
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": false,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "minSdkVersion": 23,
+  "orientation": "portrait",
+  "fingerprints": [],
+  "additionalTrustedOrigins": [],
+  "retainedBundles": [],
+  "displayOverride": [],
+  "appVersion": "1.0.0"
+}

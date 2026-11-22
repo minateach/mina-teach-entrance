@@ -7,6 +7,12 @@
     "prestart": "npm run build:account",
     "build:account": "vite build --config vite.account.config.mjs",
     "start": "node server.mjs",
+    "android:prepare": "node scripts/prepare-android.mjs",
+    "android:build": "npm run android:prepare && cd android && npx bubblewrap build --skipPwaValidation --skipSigning",
+    "android:doctor": "cd android && npx bubblewrap doctor",
+    "play:assets": "node scripts/generate-play-assets.mjs",
+    "test:android:config": "node tests/android-release-config.test.mjs",
+    "test:android:wrapper": "node tests/android-wrapper-browser-check.mjs",
     "test:history-browser": "node tests/learning-browser-check.mjs",
     "test:learning-browser": "node tests/learning-browser-check.mjs",
     "test:materials-browser": "node tests/materials-browser-check.mjs",
@@ -19,7 +25,7 @@
     "audit:materials": "node scripts/audit-learning-content.mjs",
     "knowledge:build": "node scripts/build-knowledge-base.mjs",
     "knowledge:search": "node scripts/search-knowledge-base.mjs",
-    "test": "npm run build:account && node --check server.mjs && node --check server/minimax-chat.mjs && node --check service-worker.js && node --check offline-status.js && node --check server/gemini-grounding.mjs && node --check server/image-processing.mjs && node --check server/image-usage.mjs && node --check server/image-studio.mjs && node --check server/learning-catalog.mjs && node --check server/lesson-materials.mjs && node --check scripts/build-knowledge-base.mjs && node --check scripts/search-knowledge-base.mjs && node --check knowledge-base/records.mjs && node --input-type=module --check < assistant/app.js && node --input-type=module --check < assistant/image-store.js && node --input-type=module --check < assistant/offline-ai-provider.js && node --check image-studio/app.js && node --check tests/assistant-grounding-browser-check.mjs && node --check tests/assistant-memory-browser-check.mjs && node --check tests/image-ai-browser-check.mjs && node --check tests/offline-browser-check.mjs && node --check tests/materials-browser-check.mjs && node --check learning/app.js && node --check learning/history-grade10.js && node --input-type=module --check < learning/offline-store.js && node --input-type=module --check < learning/dashboard.js && node --input-type=module --check < learning/lesson-view.js && node --input-type=module --check < learning/learning-state.js && node --input-type=module --check < learning/material-reader.js && node --input-type=module --check < learning/coverage.js && node --input-type=module --check < exams/bootstrap.js && node --check exams/app.js && node --check admin/app.js && node --test tests/*.test.mjs"
+    "test": "npm run build:account && node --check server.mjs && node --check server/minimax-chat.mjs && node --check service-worker.js && node --check offline-status.js && node --check server/gemini-grounding.mjs && node --check server/image-processing.mjs && node --check server/image-usage.mjs && node --check server/image-studio.mjs && node --check server/learning-catalog.mjs && node --check server/lesson-materials.mjs && node --check scripts/build-knowledge-base.mjs && node --check scripts/search-knowledge-base.mjs && node --check scripts/prepare-android.mjs && node --check scripts/generate-play-assets.mjs && node --check knowledge-base/records.mjs && node --input-type=module --check < assistant/app.js && node --input-type=module --check < assistant/image-store.js && node --input-type=module --check < assistant/offline-ai-provider.js && node --check image-studio/app.js && node --check tests/assistant-grounding-browser-check.mjs && node --check tests/assistant-memory-browser-check.mjs && node --check tests/image-ai-browser-check.mjs && node --check tests/offline-browser-check.mjs && node --check tests/materials-browser-check.mjs && node --check tests/android-wrapper-browser-check.mjs && node --check learning/app.js && node --check learning/history-grade10.js && node --input-type=module --check < learning/offline-store.js && node --input-type=module --check < learning/dashboard.js && node --input-type=module --check < learning/lesson-view.js && node --input-type=module --check < learning/learning-state.js && node --input-type=module --check < learning/material-reader.js && node --input-type=module --check < learning/coverage.js && node --input-type=module --check < exams/bootstrap.js && node --check exams/app.js && node --check admin/app.js && node --test tests/*.test.mjs"
   },
   "repository": {
     "type": "git",
@@ -34,6 +40,7 @@
   },
   "homepage": "https://github.com/minateach/mina-teach-entrance#readme",
   "dependencies": {
+    "@bubblewrap/cli": "^1.27.0",
     "@clerk/clerk-js": "^6.42.3",
     "@clerk/express": "^2.1.88",
     "@clerk/react": "^6.18.6",

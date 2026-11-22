@@ -797,6 +797,7 @@ function publicFilePath(pathname) {
   if (pathname === "/service-worker.js") return "service-worker.js";
   if (pathname === "/offline-status.js") return "offline-status.js";
   if (pathname === "/manifest.webmanifest") return "manifest.webmanifest";
+  if (pathname === "/privacy" || pathname === "/privacy/") return "privacy/index.html";
   if (pathname.startsWith("/images/")) {
     const imageName = pathname.slice("/images/".length);
     return /^[A-Za-z0-9._-]+\.(?:png|jpe?g|webp)$/i.test(imageName)
@@ -1688,6 +1689,23 @@ app.use(async (request, response) => {
     }
 
     await handleAssistantChat(request, response);
+    return;
+  }
+
+  if (pathname === "/.well-known/assetlinks.json") {
+    try {
+      const assetLinksPath = resolve(projectRoot, "android/assetlinks.json");
+      const content = await readFile(assetLinksPath);
+      setSecurityHeaders(response);
+      response.writeHead(200, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "public, max-age=300",
+        "Content-Length": content.length,
+      });
+      response.end(request.method === "HEAD" ? undefined : content);
+    } catch {
+      sendError(response, 404, "ASSET_LINKS_NOT_CONFIGURED", "Android app signing fingerprints have not been configured.");
+    }
     return;
   }
 

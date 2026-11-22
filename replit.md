@@ -78,3 +78,22 @@ existing work.
 Browser checks require the running workflow and `REPLIT_DEV_DOMAIN`. They do not
 bypass authentication. Successful guest navigation does not verify signed-in exam
 creation, account synchronization, or educator publishing.
+
+## Android / Google Play preparation
+
+- The Android wrapper is a Trusted Web Activity that opens the existing published
+  app at `https://mina-teach-entrance.replit.app`; it is not a replacement app.
+- The owner-approved package ID is `com.minateach.minateachai`. TWA source and
+  version metadata live under `android/`; generated build outputs and signing
+  keys are ignored by Git.
+- `npm run android:prepare` regenerates the wrapper project from
+  `android/twa-manifest.json`, including a splash with the exact Mina Teach
+  slogan. `npm run android:build` creates an unsigned local build only; Android
+  Studio/SDK and owner-controlled signing are required for a Play upload.
+- Before publishing a TWA, add the Play App Signing SHA-256 fingerprint and
+  deploy Bubblewrap's Digital Asset Links file at
+  `/.well-known/assetlinks.json`. No fingerprint or signing credential is
+  currently stored in this repository.
+- The public privacy-policy draft is at `/privacy/`; store listing, Data safety,
+  content-rating notes, screenshots, and the release checklist are in
+  `play-store/`. These are owner-review materials, not proof of Play compliance.
