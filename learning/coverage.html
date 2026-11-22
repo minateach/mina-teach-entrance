@@ -6,12 +6,12 @@
 <main class="wrap">
 <section class="panel">
 <h1>Topic material and curriculum coverage audit</h1>
-<p>This report checks materials currently available to students. It does not certify complete textbook coverage, official approval, or the accuracy of unreviewed AI-authored material. Draft content remains private.</p>
+<p>This report compares registered lessons with traceable curriculum sources. Textbook outlines, teacher guides, partial lesson sets, and missing sources are shown separately. It does not certify complete textbook coverage or official approval. Draft content remains private.</p>
 <ul id="audit-limitations"></ul>
 <label>Content language <select id="audit-language"><option value="en">English</option><option value="om">Afaan Oromoo</option><option value="am">Amharic</option></select></label>
 <button type="button" id="audit-refresh">Refresh audit</button>
 <p id="audit-status" role="status">Loading audit…</p>
-<div class="material-table"><table><caption>All catalog subjects and Grades 9–12</caption><thead><tr><th scope="col">Grade</th><th scope="col">Subject</th><th scope="col">Available lessons</th><th scope="col">Topics</th><th scope="col">Draft lessons</th><th scope="col">Source coverage</th><th scope="col">Inspect</th></tr></thead><tbody id="audit-courses"></tbody></table></div>
+<div class="material-table source-audit-table"><p class="audit-table-caption">The nine requested subjects across Grades 9–12; lesson counts use the selected language</p><table aria-label="Course coverage by grade and subject"><thead><tr><th scope="col">Grade</th><th scope="col">Subject</th><th scope="col">Available lessons</th><th scope="col">Topics</th><th scope="col">Draft lessons</th><th scope="col">Source coverage</th><th scope="col">Units outlined</th><th scope="col">Inspect</th></tr></thead><tbody id="audit-courses"></tbody></table></div>
 </section>
-<section class="panel" id="topic-audit"><h2>Inspect a subject's available topic materials</h2><p>Choose a populated subject above to inspect notes, definitions, examples, additional sections, shared questions, and missing material. No missing course is represented as an empty lesson.</p></section>
+<section class="panel" id="topic-audit"><h2>Inspect source mapping and available lessons</h2><p>Open any requested subject-grade row to inspect its source status. Populated courses also expose their lesson materials and gaps. Missing sources are not represented as empty lessons.</p></section>
 </main></body></html>

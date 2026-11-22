@@ -50,10 +50,16 @@ try {
     auditedTopics+=courseTopics;
   }
   console.log(`PASS: audited every currently registered English-content topic: ${auditedTopics} topics across ${checkedLessons.size} accessible lessons. This excludes unimported textbook material.`);
-  await navigate("/learning/coverage.html",'document.querySelectorAll("#audit-courses tr").length===72');
+  await navigate("/learning/coverage.html",'document.querySelectorAll("#audit-courses tr").length===36');
   await waitFor("navigator.serviceWorker?.controller");
+  assert.equal(await evaluate('document.querySelectorAll("#audit-courses td[data-label]").length'),36*8);
+  assert.equal(await evaluate('getComputedStyle(document.querySelector("#audit-courses tr")).display'),"block");
   assert.equal(await evaluate("document.documentElement.scrollWidth<=innerWidth"),true);
   await evaluate('[...document.querySelectorAll("#audit-courses tr")].find(row=>row.children[0].textContent==="10"&&row.children[1].textContent==="History").querySelector("button").click()');
+  await waitFor('document.querySelector("#topic-audit h2")?.textContent.includes("Source map")');
+  assert.match(await evaluate('document.querySelector("#topic-audit").textContent'),/History Student Textbook, Grade 10/);
+  assert.match(await evaluate('document.querySelector("#topic-audit").textContent'),/2023/);
+  await evaluate('[...document.querySelectorAll("#topic-audit button")].find(button=>button.textContent==="Inspect available lesson materials").click()');
   await waitFor('document.querySelectorAll("#topic-audit article").length===19');
   assert.match(await evaluate('document.getElementById("topic-audit").textContent'),/Full source-by-source topic completeness/);
 
@@ -79,7 +85,7 @@ try {
     }
     return null;
   });
-  await navigate("/learning/?grade=9&subject=English&lesson=db-900002&language=en",'document.querySelector("#topic-materials [role=status]")?.textContent.startsWith("Material 1 of 14")');
+  await navigate("/learning/?grade=9&subject=English&lesson=db-900002&language=en",'document.querySelector("#topic-materials [role=status]")?.textContent.startsWith("Material 1 of 16")');
   assert.match(await evaluate('document.getElementById("lesson-page").textContent'),/INTRODUCTION-MUST-REMAIN-VISIBLE/);
   const captured=await evaluate(`(()=>{
     const root=document.getElementById("topic-0"),next=root.querySelector("[data-part-action=next]");let text="";
@@ -99,7 +105,7 @@ try {
       assert.equal(await evaluate('document.getElementById("complete-lesson").disabled'),true);
       await evaluate('[...document.querySelectorAll("#topic-materials button")].find(button=>button.textContent==="Retry material").click()');
     }
-    await waitFor(`document.querySelector("#topic-materials [role=status]").textContent.startsWith("Material ${index+1} of 14")`);
+    await waitFor(`document.querySelector("#topic-materials [role=status]").textContent.startsWith("Material ${index+1} of 16")`);
     assert.equal(await evaluate('document.querySelector(".material-content>h3").textContent'),materials[index].title);
     if(materials[index].type==="table")assert.match(await evaluate('document.querySelector(".material-content table").textContent'),/ALSO-PRESERVED/);
     if(materials[index].type==="diagram")assert.equal(await evaluate('document.querySelector(".material-diagram").naturalWidth>0'),true);
@@ -112,9 +118,9 @@ try {
   }
   assert.match(await evaluate('document.querySelector(".material-content").textContent'),/END-OF-TIMELINE/);
   await evaluate('document.querySelector("[data-material-action=previous]").click()');
-  await waitFor('document.querySelector("#topic-materials [role=status]").textContent.startsWith("Material 13 of 14")');
+  await waitFor('document.querySelector("#topic-materials [role=status]").textContent.startsWith("Material 15 of 16")');
   await evaluate('document.querySelector("[data-material-action=next]").click()');
-  await waitFor('document.querySelector("#topic-materials [role=status]").textContent.startsWith("Material 14 of 14")');
+  await waitFor('document.querySelector("#topic-materials [role=status]").textContent.startsWith("Material 16 of 16")');
   assert.equal(await evaluate('document.getElementById("complete-lesson").disabled'),false);
   await evaluate('document.getElementById("complete-lesson").click()');
   assert.match(await evaluate('document.getElementById("lesson-topic-progress").textContent'),/2 of 2/);
@@ -134,20 +140,20 @@ try {
   assert.equal(await evaluate('JSON.parse(localStorage.getItem("minaTeach.learning.v1")).practice[0].kind'),"published_lesson");
   assert.match(await evaluate("location.search"),/material=timeline/);
   const reopened=await evaluate("location.pathname+location.search");
-  await navigate(reopened,'document.querySelector("#topic-materials [role=status]")?.textContent.startsWith("Material 14 of 14")');
+  await navigate(reopened,'document.querySelector("#topic-materials [role=status]")?.textContent.startsWith("Material 16 of 16")');
   await evaluate('[...document.querySelectorAll(".lesson-page button")].find(button=>button.textContent.includes("Download for offline"))?.click()');
   await waitFor('document.querySelector(".lesson-page").textContent.includes("Available offline")');
   assert.match(await evaluate('document.querySelector(".lesson-page").textContent'),/still need internet/,"remote resource is clearly identified as requiring connectivity");
-  const offlineImageCached=await evaluate(`(async()=>{const db=await new Promise((resolve,reject)=>{const request=indexedDB.open("mina-teach-offline");request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)});const values=await new Promise((resolve,reject)=>{const request=db.transaction("downloads").objectStore("downloads").getAll();request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)});db.close();return values.find(item=>item.type==="lesson")?.responses?.["/api/learning/content/db-900002/materials?offset=6&limit=1"]?.materials?.[0]?.offlineImageDataUrl?.startsWith("data:image/")})()`);
+   const offlineImageCached=await evaluate(`(async()=>{const db=await new Promise((resolve,reject)=>{const request=indexedDB.open("mina-teach-offline");request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)});const values=await new Promise((resolve,reject)=>{const request=db.transaction("downloads").objectStore("downloads").getAll();request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)});db.close();return values.find(item=>item.type==="lesson")?.responses?.["/api/learning/content/db-900002/materials?offset=7&limit=1"]?.materials?.[0]?.offlineImageDataUrl?.startsWith("data:image/")})()`);
   assert.equal(offlineImageCached,true,"offline lesson record embeds the full same-origin diagram");
   await browser.stopIntercept();
   await command("Network.emulateNetworkConditions",{offline:true,latency:0,downloadThroughput:0,uploadThroughput:0});
   await waitFor("navigator.onLine===false");
   await command("Page.reload");
-  await waitFor('document.querySelector("#topic-materials [role=status]")?.textContent.startsWith("Material 14 of 14")');
+  await waitFor('document.querySelector("#topic-materials [role=status]")?.textContent.startsWith("Material 16 of 16")');
   for(let index=0;index<materials.length;index++) {
     await evaluate(`(()=>{const select=document.querySelector("#topic-materials select");select.value="${index}";select.dispatchEvent(new Event("change"));})()`);
-    await waitFor(`document.querySelector("#topic-materials [role=status]").textContent.startsWith("Material ${index+1} of 14")`);
+    await waitFor(`document.querySelector("#topic-materials [role=status]").textContent.startsWith("Material ${index+1} of 16")`);
     assert.equal(await evaluate('document.querySelector(".material-content>h3").textContent'),materials[index].title,`offline material ${index+1} opens completely`);
     if(materials[index].type==="diagram") {
       const diagramSource=await evaluate('document.querySelector(".material-diagram").src');
@@ -161,6 +167,6 @@ try {
     assert.equal(status,401);
   }
   assert.deepEqual(browser.exceptions,[]);
-  console.log("PASS: real coverage audit for all 72 catalog grade/subject combinations and 19 available topics; full long notes plus introduction; all 14 material renderers; numbered text and material Previous/Next; retry without false completion; diagrams/tables/MCQ answers; published-lesson practice; reload position; phone layout; protected material authoring endpoints.");
+  console.log("PASS: real coverage audit for 36 requested course combinations and 19 available Grade 10 History topics; full long notes plus introduction; all 16 material renderers; numbered text and material Previous/Next; retry without false completion; diagrams/tables/MCQ answers; published-lesson practice; reload position; phone layout; protected material authoring endpoints.");
   console.log("SCOPE: rich published-material rendering used browser-only API fixtures. Real PostgreSQL storage/pagination is tested separately with rolled-back rows. Real signed-in authoring and complete textbook ingestion are not verified.");
 }finally{await browser.close();}

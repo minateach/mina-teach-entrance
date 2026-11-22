@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { makeRecord, validateRecord } from "../knowledge-base/records.mjs";
 import { historyAnswers } from "../server/history-grade10-answers.mjs";
+import { allPrimaryCurriculumSources } from "../server/curriculum-sources.mjs";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const assetsDir = join(root, "attached_assets");
@@ -59,7 +60,7 @@ function inferLanguage(text) {
 function getPageFromSource(sourcePages, sourceLabel = "") {
   const value = sourcePages || sourceLabel;
   if (typeof value !== "string") return null;
-  const match = value.match(/\b(?:p(?:age)?\.?\s*)(\d+)\b/i);
+  const match = value.match(/\b(?:pp?(?:age)?s?\.?\s*)(\d+)\b/i);
   return match ? Number(match[1]) : null;
 }
 
@@ -290,6 +291,22 @@ function includeLesson(row) {
   for (const [index, material] of (row.materials || []).entries()) {
     const sourcePages = material.sourcePages || null;
     const contentType = material.type || "lesson_notes";
+    const materialSource = {
+      ...source,
+      title: material.sourceTitle || material.sourceLabel || source.title,
+      file: material.sourceFile || source.file,
+      label: material.sourceLabel || source.label,
+      url: material.sourceUrl || source.url,
+      author: material.sourceAuthor || source.author,
+      publisher: material.sourcePublisher || source.publisher,
+      publication_date: material.sourcePublicationDate || source.publication_date,
+      metadata: {
+        ...source.metadata,
+        source_pages: sourcePages,
+        edition: material.sourceEdition || null,
+        source_file: material.sourceFile || null,
+      },
+    };
     const content = [
       material.text, material.definition, material.expression, material.explanation,
       material.caption, material.alt, material.term && `${material.term}: ${material.definition}`,
@@ -304,12 +321,16 @@ function includeLesson(row) {
       options: material.choices || null,
       correct_answer: material.type === "mcq" && Number.isInteger(material.correctIndex) ? material.choices?.[material.correctIndex] ?? null : material.answer ?? null,
       explanation: material.explanation || null,
-      source: { ...source, label: material.sourceLabel || source.label, url: material.sourceUrl || source.url },
+      source: materialSource,
       page: getPageFromSource(sourcePages, row.source_label), content,
       review_status: row.review_status, retrieval_eligible: eligible,
       metadata: {
         material_id: material.id || null,
         source_pages: sourcePages,
+        source_author: material.sourceAuthor || null,
+        source_publisher: material.sourcePublisher || null,
+        source_publication_date: material.sourcePublicationDate || null,
+        source_edition: material.sourceEdition || null,
         material_title: material.title || null,
         term: material.term || null,
         definition: material.definition || null,
@@ -404,6 +425,16 @@ function reportText(data) {
   const excluded = data.sources.filter(source => source.excluded_reason && !source.duplicate_of);
   const issueRows = data.sources.filter(source => source.quality_note);
   const typeCounts = Object.entries(metrics.content_types).sort(([a], [b]) => a.localeCompare(b));
+  const sourceMap = allPrimaryCurriculumSources();
+  const outlineText = item => item.units.map(unit => `${unit.number}. ${unit.title}${unit.sections?.length ? ` — ${unit.sections.join(", ")}` : ""}`).join("; ") || "None";
+  const sourceDetails = item => item.source ? [
+    item.source.title,
+    item.source.publisher,
+    item.source.authors?.length ? `Authors: ${item.source.authors.join(", ")}` : null,
+    item.source.publicationDate ? `Publication: ${item.source.publicationDate}` : null,
+    item.source.pageCount ? `PDF pages: ${item.source.pageCount}` : null,
+    item.source.url ? `[Open recorded source](${item.source.url})` : item.source.file ? `File: \`${item.source.file}\`` : null,
+  ].filter(Boolean).join("; ") : "No grade-specific source registered";
   return `# MINA TEACH AI Knowledge Base Audit
 
 Generated: ${new Date().toISOString()}
@@ -431,6 +462,14 @@ The export prepares data for retrieval. **No AI model was trained, fine-tuned, o
 ${metrics.coverage.matrix.map(row => `| ${row.grade} | ${row.subject} | ${row.records} | ${row.has_material ? "Material present; completeness not verified" : "No matching grade-tagged retrieval material"} |`).join("\n")}
 
 There are ${absent.length} empty subject-grade combinations out of ${metrics.coverage.matrix.length}. A record count is not a curriculum-completeness claim.
+
+## Textbook and syllabus source mapping
+
+| Grade | Subject | Mapping status | Recorded source | Unit and section titles transcribed |
+|---:|---|---|---|---|
+${sourceMap.map(item => `| ${item.grade} | ${item.subject} | ${item.statusLabel} | ${sourceDetails(item)} | ${outlineText(item)} |`).join("\n")}
+
+This source map distinguishes uploaded textbook outlines, partial lesson sets, a teacher-guide-only reference, and missing sources. Unit headings are not complete lessons; no course is certified complete by this map.
 
 ## Language coverage
 
@@ -495,7 +534,20 @@ function htmlReport(metrics, sources) {
   const escape = value => String(value ?? "").replace(/[&<>"']/g, character => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   })[character]);
+  const curriculumSources = allPrimaryCurriculumSources();
   const rows = metrics.coverage.matrix.map(row => `<tr><td>${row.grade}</td><td>${escape(row.subject)}</td><td>${row.records}</td><td>${row.has_material ? "Present; completeness not verified" : "Missing"}</td></tr>`).join("");
+  const curriculumRows = curriculumSources.map(item => {
+    const source = item.source ? [
+      item.source.url ? `<a href="${escape(item.source.url)}" target="_blank" rel="noopener noreferrer">${escape(item.source.title)}</a>` : escape(item.source.title || ""),
+      item.source.publisher ? escape(item.source.publisher) : "",
+      item.source.authors?.length ? `Authors: ${escape(item.source.authors.join(", "))}` : "",
+      item.source.publicationDate ? `Publication: ${escape(item.source.publicationDate)}` : "",
+      item.source.pageCount ? `PDF pages: ${item.source.pageCount}` : "",
+      item.source.file ? `File: ${escape(item.source.file)}` : "",
+    ].filter(Boolean).join("<br>") : "No grade-specific source registered";
+    const outline = item.units.map(unit => `${unit.number}. ${unit.title}${unit.sections?.length ? ` — ${unit.sections.join(", ")}` : ""}`).join("; ") || "None";
+    return `<tr><td>${item.grade}</td><td>${escape(item.subject)}</td><td>${escape(item.statusLabel)}</td><td>${source}</td><td>${escape(outline)}</td></tr>`;
+  }).join("");
   const languageRows = metrics.coverage.languageCoverage.map(row => `<tr><td>${escape(row.language)}</td><td>${row.records}</td><td>${escape(row.subjects.join(", ") || "None")}</td></tr>`).join("");
   const sourceRows = sources.map(item => `<tr><td>${escape(item.file)}</td><td>${escape(item.subject || "Unassigned")}</td><td>${escape(item.grade ?? "Unassigned")}</td><td>${escape(item.content_type)}</td><td>${item.extracted_pages}</td><td>${escape(item.pdf_metadata?.Author || "Not in PDF metadata")}</td><td>${escape(item.duplicate_of ? `Duplicate of ${item.duplicate_of}` : item.excluded_reason || item.quality_note || "Indexed")}</td></tr>`).join("");
   const warnings = sources.filter(item => item.quality_note).map(item => `<li><strong>${escape(item.file)}</strong>: ${escape(item.quality_note)}${item.blank_pages.length ? ` Blank pages: ${item.blank_pages.join(", ")}.` : ""}${item.sparse_pages.length ? ` Sparse pages: ${item.sparse_pages.join(", ")}.` : ""}</li>`).join("") || "<li>No extraction warnings.</li>";
@@ -527,6 +579,7 @@ footer{color:var(--muted);font-size:13px;margin:20px 4px}@media(max-width:640px)
 <div class="card"><strong>${metrics.exact_duplicate_records}</strong><span>Exact duplicate records flagged</span></div>
 </div><p class="notice">This prepares records for retrieval. No AI model was trained, fine-tuned, or modified. The current AI Tutor is not yet connected to this local index.</p></section>
 <section><h2>Requested subject and grade coverage</h2><p>${metrics.coverage.matrix.filter(row => !row.has_material).length} of ${metrics.coverage.matrix.length} combinations have no grade-tagged eligible record. Existing records do not prove complete curriculum coverage.</p><div class="table-wrap"><table><thead><tr><th>Grade</th><th>Subject</th><th>Records</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div></section>
+<section><h2>Textbook and syllabus source mapping</h2><p>The 36 requested course combinations are mapped to available references or explicitly marked as missing. A table of contents or partial lesson set is not complete course coverage; no course is certified complete.</p><div class="table-wrap"><table><thead><tr><th>Grade</th><th>Subject</th><th>Mapping status</th><th>Recorded source</th><th>Unit and section titles transcribed</th></tr></thead><tbody>${curriculumRows}</tbody></table></div></section>
 <section><h2>Language coverage</h2><div class="table-wrap"><table><thead><tr><th>Language</th><th>Records</th><th>Subjects represented</th></tr></thead><tbody>${languageRows}</tbody></table></div><p>Uploaded pages are tagged by a simple script check; Latin text cannot reliably distinguish English from Afaan Oromoo. Database language tags are preserved. Unknown values stay null.</p></section>
 <section><h2>Duplicate files</h2><ul>${duplicates}</ul><h2>Excluded files</h2><ul>${excluded}</ul></section>
 <section><h2>Extraction quality flags</h2><ul>${warnings}</ul><p>Blank or sparse extracted pages may need OCR or visual review. Extraction checks do not certify source accuracy.</p></section>

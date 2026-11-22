@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {createLearningCatalog,validateScope,subjects,LearningInputError} from "../server/learning-catalog.mjs";
+import {allPrimaryCurriculumSources,curriculumSourceFor} from "../server/curriculum-sources.mjs";
 
 const emptyPool={query:async()=>({rows:[]})};
 test("all 36 requested grade/subject combinations have a valid course without fake lessons",async()=>{
@@ -15,6 +16,22 @@ test("all 36 requested grade/subject combinations have a valid course without fa
       assert.equal(catalog.subjects.find(item=>item.name===subject).lessonCount,course.lessonCount);
     }
   }
+});
+test("the 36-course source map distinguishes textbook outlines, partial sets, teacher guides, and missing sources",async()=>{
+  const mappings=allPrimaryCurriculumSources();
+  assert.equal(mappings.length,36);
+  assert.equal(new Set(mappings.map(item=>`${item.grade}:${item.subject}`)).size,36);
+  assert.equal(mappings.filter(item=>item.source).length,7);
+  assert.equal(mappings.filter(item=>item.status==="source_required").length,29);
+  assert.equal(curriculumSourceFor(9,"Mathematics").units.length,7);
+  assert.deepEqual(curriculumSourceFor(10,"History").units.map(unit=>unit.number),[1]);
+  assert.equal(curriculumSourceFor(10,"Geography").status,"teacher_guide_only");
+  assert.equal(curriculumSourceFor(11,"Civics").status,"source_required");
+  assert.ok(mappings.every(item=>item.curriculumCompletenessVerified===false));
+  const audit=await createLearningCatalog(emptyPool).audit({language:"en"});
+  const primary=audit.courses.filter(course=>course.primary);
+  assert.equal(primary.length,36);
+  assert.ok(primary.every(course=>course.curriculumSource && course.sourceCoverage===course.curriculumSource.summary));
 });
 test("summary requests omit prose/questions; detail requests load one actual lesson",async()=>{
   const api=createLearningCatalog(emptyPool);

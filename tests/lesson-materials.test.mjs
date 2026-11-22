@@ -15,16 +15,18 @@ const stateUrl=`data:text/javascript;base64,${Buffer.from(state).toString("base6
 const reader=readFileSync(new URL("../learning/material-reader.js",import.meta.url),"utf8").replace('"./learning-state.js"',JSON.stringify(stateUrl));
 const {textParts}=await import(`data:text/javascript;base64,${Buffer.from(reader).toString("base64")}`);
 
-test("all fourteen material types preserve their full payloads and reject malformed or discarded fields",()=>{
+test("all sixteen material types preserve full content and source provenance",()=>{
   const materials=materialFixtures(),before=JSON.stringify(materials);
   assert.equal(materialsProblem(materials),null);
   assert.equal(JSON.stringify(materials),before);
-  assert.equal(materials.length,14);
+  assert.equal(materials.length,16);
   assert.ok(materials[0].text.length>20000);
   assert.match(materialProblem({...materials[0],unsupportedField:"must not disappear"}),/Unrecognized/);
-  assert.match(materialProblem({...materials[7],rows:[["missing column"]]}),/complete rows/);
-  assert.match(materialProblem({...materials[11],choices:["A","B"]}),/four choices/);
+  assert.match(materialProblem({...materials[8],rows:[["missing column"]]}),/complete rows/);
+  assert.match(materialProblem({...materials[13],choices:["A","B"]}),/four choices/);
   assert.match(materialProblem({...materials[6],url:"javascript:alert(1)"}),/safe|HTTPS/);
+  assert.match(materialProblem({...materials[4],items:[]}),/Objectives require/);
+  assert.match(materialProblem({...materials[12],text:"",items:[]}),/Summaries require/);
   assert.match(materialsProblem([materials[0],materials[0]]),/Duplicate/);
 });
 test("numbered text sections reassemble exactly, including whitespace, Oromo, Amharic and Unicode boundary characters",()=>{
@@ -78,7 +80,7 @@ test("PostgreSQL stores long notes unchanged and returns every material through 
     assert.deepEqual(recovered,materials);
     await assert.rejects(api.materials(id,{offset:-1}),/valid material page/);
     const audit=await api.audit({grade:9,subject:"Mathematics"});
-    assert.ok(audit.topics.some(topic=>topic.materialSections.length===14));
+    assert.ok(audit.topics.some(topic=>topic.materialSections.length===materials.length));
     await client.query("UPDATE mina_learning_lessons SET content_version=content_version+1 WHERE id=$1",[result.rows[0].id]);
     assert.notEqual((await api.lesson(id)).key,lesson.key);
   }finally {

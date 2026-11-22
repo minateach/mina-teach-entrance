@@ -5,14 +5,14 @@ generated = []
 id = "gnun3IMhTaSk2EuNGjerl"
 uri = "file://generated-artifacts/knowledge-base/report.html"
 type = "html"
-title = "MINA TEACH AI Knowledge Base Audit"
-description = "Coverage, duplicate files, extraction quality, language gaps, and readiness for retrieval."
+title = "Mina Teach AI curriculum source audit"
+description = "A readable source and coverage report for all 36 requested Grade 9–12 subject combinations, including available PDF outlines, duplicate-file flags, extraction warnings, and the current integration limitations."
 logical_id = "683aba88-898a-4d6d-bf64-e342d6723c0b"
-content_hash = "sha256:6ecff2a09d145f58d4104523b577d2b86cecea801efbbe6a8eb67a6ad16088f6"
-size = 13068
-mtime_ms = 1795351767821
-storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:d21f7a53-07e2-413b-b668-fe31619cf46b/683aba88-898a-4d6d-bf64-e342d6723c0b/721c916c-7de1-43b5-bcc4-05291c083d11"
-storage_version_token = "1795351821795849"
+content_hash = "sha256:59f8dcaaf621820bc2ac9adf9f204450480724d444b74cbcb3c26a97150869c7"
+size = 24477
+mtime_ms = 1795363017281
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:d21f7a53-07e2-413b-b668-fe31619cf46b/683aba88-898a-4d6d-bf64-e342d6723c0b/b057df61-470b-471e-85fe-a096c752c472"
+storage_version_token = "1795365709232370"
 content_type = "text/html"
 
 [[outputs]]

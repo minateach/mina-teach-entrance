@@ -44,7 +44,7 @@ function resource(parent,url,text) {
 }
 export async function renderMaterial(parent,material) {
   parent.replaceChildren(element("h3",material.title));
-  const used=new Set(["id","topicId","topicTitle","title","type","sourceLabel","sourceUrl","sourcePages","offlineImageDataUrl"]);
+  const used=new Set(["id","topicId","topicTitle","title","type","sourceLabel","sourceUrl","sourcePages","sourceAuthor","sourcePublisher","sourcePublicationDate","sourceEdition","sourceFile","sourceTitle","offlineImageDataUrl"]);
   let imageReady=null;
   if(material.type==="table") {
     const wrap=element("div");wrap.className="material-table";const table=element("table");
@@ -76,13 +76,27 @@ export async function renderMaterial(parent,material) {
     appendFullText(answer,material.explanation);parent.append(answer);
     ["question","choices","correctIndex","explanation"].forEach(key=>used.add(key));
   }
+  if(["objective","summary"].includes(material.type)) {
+    appendValue(parent,material.text ?? material.items);
+    used.add("text");used.add("items");
+  }
   // Render every remaining stored content field, not a selected subset.
   for(const [key,value] of Object.entries(material))if(!used.has(key)) {
     parent.append(element("h4",key.replace(/([a-z])([A-Z])/g,"$1 $2")));
     appendValue(parent,value);
   }
-  if(material.sourceLabel || material.sourceUrl || material.sourcePages) {
-    const source=element("p",`Source: ${material.sourceLabel || "See lesson reference"}${material.sourcePages?` · ${material.sourcePages}`:""}. `);
+  if(material.sourceLabel || material.sourceUrl || material.sourcePages || material.sourceAuthor || material.sourcePublisher || material.sourcePublicationDate || material.sourceEdition || material.sourceFile || material.sourceTitle) {
+    const citation=[
+      material.sourceTitle,
+      material.sourceLabel || "See lesson reference",
+      material.sourceAuthor?`Author: ${material.sourceAuthor}`:null,
+      material.sourcePublisher?`Publisher: ${material.sourcePublisher}`:null,
+      material.sourceEdition?`Edition: ${material.sourceEdition}`:null,
+      material.sourcePublicationDate?`Published: ${material.sourcePublicationDate}`:null,
+      material.sourcePages?`Pages: ${material.sourcePages}`:null,
+      material.sourceFile?`File: ${material.sourceFile}`:null,
+    ].filter(Boolean).join(" · ");
+    const source=element("p",`Source: ${citation}. `);
     if(material.sourceUrl)resource(source,material.sourceUrl,"Open material reference");parent.append(source);
   }
   if(imageReady)await imageReady;

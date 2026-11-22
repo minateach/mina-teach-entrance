@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import history from "../learning/history-grade10.js";
 import {materialOutlineSql,auditLessonTopics} from "./lesson-materials.mjs";
 import {historyAnswers} from "./history-grade10-answers.mjs";
+import {curriculumSourceFor} from "./curriculum-sources.mjs";
 
 export const subjects = [
   "Mathematics", "Physics", "Chemistry", "Biology", "English", "Geography",
@@ -141,9 +142,10 @@ export function createLearningCatalog(pool) {
         const lessons=await summaries({...scope,grade});available.push(...lessons);
         for(const subject of subjects.filter(name=>!scope.subject || name===scope.subject)) {
           const subset=lessons.filter(lesson=>lesson.subject===subject);
+          const curriculumSource=curriculumSourceFor(grade,subject);
           courses.push({grade,subject,primary:subjects.indexOf(subject)<9,language:scope.language,lessons:subset.length,topics:subset.reduce((count,lesson)=>count+lesson.topicKeys.length,0),lessonPracticeMcqs:subset.reduce((count,lesson)=>count+lesson.practiceQuestionCount,0),
             drafts:drafts.rows.find(row=>row.grade===grade && row.subject===subject)?.count || 0,
-            curriculumCompletenessVerified:false,sourceCoverage:"Full textbook chapter/topic mapping not yet verified"});
+            curriculumCompletenessVerified:false,sourceCoverage:curriculumSource.summary,curriculumSource});
         }
       }
       let topics=[],nextOffset=null;
