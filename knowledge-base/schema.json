@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://minateach.ai/schemas/knowledge-record-v1.json",
+  "title": "MINA TEACH AI Knowledge Record",
+  "description": "Provenance-preserving JSONL record for textbook pages, lessons, learning materials, and questions. Null means the source did not provide a verified value.",
+  "type": "object",
+  "required": [
+    "id",
+    "subject",
+    "grade",
+    "chapter",
+    "topic",
+    "language",
+    "content_type",
+    "question",
+    "options",
+    "correct_answer",
+    "explanation",
+    "source",
+    "page",
+    "content",
+    "review_status",
+    "retrieval_eligible"
+  ],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "subject": { "type": ["string", "null"] },
+    "grade": { "type": ["integer", "null"], "enum": [9, 10, 11, 12, null] },
+    "chapter": { "type": ["string", "null"] },
+    "topic": { "type": ["string", "null"] },
+    "language": { "type": ["string", "null"], "enum": ["en", "om", "am", null] },
+    "content_type": {
+      "type": "string",
+      "enum": [
+        "textbook_page", "teacher_guide_page", "lesson_notes_page",
+        "practice_exam_page", "question_bank_page", "question_answer_page",
+        "source_page", "lesson", "lesson_notes", "subtopic", "definition",
+        "concept", "example", "formula", "diagram", "table", "activity",
+        "exercise", "review_question", "mcq", "answer_key", "explanation",
+        "resource", "timeline", "empty_page"
+      ]
+    },
+    "question": { "type": ["string", "null"] },
+    "options": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+    "correct_answer": { "type": ["string", "number", "boolean", "object", "array", "null"] },
+    "explanation": { "type": ["string", "null"] },
+    "source": {
+      "type": "object",
+      "required": ["id", "file", "title", "author", "publisher", "publication_date", "url", "label"],
+      "properties": {
+        "id": { "type": "string" },
+        "file": { "type": ["string", "null"] },
+        "title": { "type": ["string", "null"] },
+        "author": { "type": ["string", "null"] },
+        "publisher": { "type": ["string", "null"] },
+        "publication_date": { "type": ["string", "null"] },
+        "url": { "type": ["string", "null"] },
+        "label": { "type": ["string", "null"] },
+        "kind": { "type": ["string", "null"] },
+        "metadata": { "type": "object" }
+      },
+      "additionalProperties": true
+    },
+    "page": { "type": ["integer", "null"], "minimum": 1 },
+    "content": { "type": "string" },
+    "review_status": { "type": ["string", "null"] },
+    "retrieval_eligible": { "type": "boolean" },
+    "metadata": { "type": "object" }
+  },
+  "additionalProperties": true
+}
