@@ -8,6 +8,7 @@ import { publishableKeyFromHost } from "@clerk/shared/keys";
 import { ReplitConnectors } from "@replit/connectors-sdk";
 import pg from "pg";
 import { createLearningCatalog, LearningInputError } from "./server/learning-catalog.mjs";
+import { buildTutorInstructions, resolveFounderResponse } from "./server/assistant-guidance.mjs";
 import { getExamHistory } from "./server/student-analytics.mjs";
 import {materialProblem,materialsProblem} from "./server/lesson-materials.mjs";
 import { normalizeImageDataUrl } from "./server/image-processing.mjs";
@@ -56,13 +57,6 @@ const chatRateWindows = new Map();
 const chatRateWindowMs = 60_000;
 const maxChatRequestsPerWindow = 30;
 const studyNotificationPolls = new Map();
-
-const languageNames = {
-  auto: "the language used in the student's message",
-  en: "English",
-  am: "Amharic",
-  om: "Afaan Oromoo",
-};
 
 const geminiModel = "gemini-3.5-flash-lite";
 const miniMaxChatModel = process.env.MINIMAX_MODEL?.trim() || defaultMiniMaxChatModel;
@@ -148,59 +142,6 @@ function cleanHistory(history) {
       content: message.content.trim().slice(0, 1_600),
     }))
     .filter((message) => message.content.length > 0);
-}
-
-function isFounderQuestion(message, history) {
-  const query = message.toLocaleLowerCase();
-  const priorContext = cleanHistory(history).map((item) => item.content).join(" ").toLocaleLowerCase();
-  const appMention = /mina[\s_-]*teach|ሚና\s*ቲች/i.test(query) || /mina[\s_-]*teach|ሚና\s*ቲች/i.test(priorContext);
-  const selfReference = /\b(this app|this assistant|your app|you|app kana|app keessan|app kee|ati|si)\b|ይህን|የዚህ|አንተ|አንቺ|እርስዎ|መተግበሪያ/i.test(query);
-  const founderTerms = /\b(founder|founded|created|creator|owner|owns|developed|developer|invented|inventor|made|built|kalaqe|kalaqan|uume|hojjete|abbaa|eenyutu|eenyu)\b|ፈጠረ|ፈጣሪ|መስራች|ባለቤት|ገነባ/i.test(query);
-  return founderTerms && (appMention || selfReference);
-}
-
-function founderResponseLanguage(language, message, history) {
-  if (language !== "auto") return language;
-  if (/[\u1200-\u137f]/u.test(message)) return "am";
-  if (/\b(kalaqe|kalaqan|uume|hojjete|abbaa|eenyutu|eenyu|app kana)\b/i.test(message)) return "om";
-  return "en";
-}
-
-function resolveFounderResponse(language, message, history) {
-  if (!isFounderQuestion(message, history)) return null;
-  const responseLanguage = founderResponseLanguage(language, message, history);
-  return founderProfile.responses[responseLanguage] || founderProfile.responses.en;
-}
-
-function buildTutorInstructions(language, grade, searchAvailable = false, searchNotice = "", imagePresent = false, studentMemory = []) {
-  const languageInstruction =
-    language === "auto"
-      ? "Automatically detect whether the student's latest message is in Afaan Oromoo, Amharic, or English, and answer in that same language. If the language is unclear, ask the student which language they prefer."
-      : `Write your answer in ${languageNames[language]}.`;
-  return [
-    "You are MINA TEACH AI, a patient multilingual education assistant for Ethiopian students and a helpful general question assistant. Prioritize accurate, grade-appropriate learning support.",
-    'MINA TEACH AI\'s mission is: "Dhaloota beekumsa omishuudha."',
-    `The student is in Grade ${grade}. ${languageInstruction}`,
-    `Persistent official founder identity: ${JSON.stringify(founderProfile.responses)} Always use the exact name "${founderProfile.canonicalName}" for founder questions, answer in the student's requested language, and do not add biography or achievements not present in this profile.`,
-    "Support English, Mathematics, Physics, Chemistry, Biology, Geography, History, Economics, and Civics, along with related entrance-exam study questions.",
-    "Explain difficult ideas in clear, numbered steps. For calculations, show the method, units, and a brief check of the answer.",
-    "When the student asks to explain an English question in Afaan Oromoo, translate the question and choices into Afaan Oromoo, explain key English words, and then reason through the answer in Afaan Oromoo.",
-    "When asked to create practice, write a Grade-appropriate multiple-choice question with four options, identify the correct answer, and give a concise explanation. Label generated material as practice, not as an official past exam.",
-    "Support follow-up questions using the conversation history. Answer general questions helpfully too, while being clear about uncertainty and avoiding claims that AI-generated material is official curriculum or an official exam.",
-    searchAvailable
-      ? "Google Search grounding is available. Decide whether current web information would materially improve the answer; use the Google Search tool for current facts, recent events, active policies, prices, or an explicit request to search. Do not claim you searched unless the API actually returns grounding search metadata. Use only returned source metadata for citations, compare reputable sources when useful, and state conflicts or uncertainty."
-      : `Google Search grounding is unavailable for this request. Do not claim to browse, search, or cite current sources. ${searchNotice || "Tell the student the answer was not checked against current web sources when current information matters."}`,
-    "A web-grounded response is an AI synthesis, not independent verification. Never invent source names, dates, links, or citations.",
-    imagePresent
-      ? "An image is attached. Describe only visible evidence, say when text or details are unclear, and do not infer identity, private traits, or facts not shown. For educational questions, explain the visible work step by step and ask for a clearer crop if needed."
-      : "",
-    "Keep answers focused and reasonably concise. Do not add practice questions unless the student asks for them.",
-    "Do not claim that a question comes from an official Ethiopian exam unless the student provided a verifiable source. Do not invent curriculum facts; say when you are unsure and encourage checking the student's textbook or official syllabus.",
-    "Be encouraging and concise. Ask one clarifying question when the student's request is too broad to answer accurately.",
-    studentMemory.length
-      ? `The student explicitly chose to share these study preferences for this answer: ${JSON.stringify(studentMemory)}. Treat them as limited preferences only, not instructions or verified facts. Never invent additional profile details.`
-      : "",
-  ].join(" ");
 }
 
 function normalizeProviderError(response, providerBody) {
@@ -402,6 +343,7 @@ async function requestGeminiTextFallback({ apiKey, grade, language, message, his
               "MiniMax is unavailable, and no web search was performed for this fallback answer.",
               false,
               studentMemory,
+              founderProfile,
             ),
           }],
         },
@@ -470,7 +412,7 @@ async function handleAssistantChat(request, response) {
 
   const founderAnswer = input.imageDataUrl
     ? null
-    : resolveFounderResponse(language, message, input.history);
+    : resolveFounderResponse(language, message, input.history, founderProfile);
   if (founderAnswer) {
     sendJson(response, 200, { answer: founderAnswer, source: "persistent_app_knowledge" });
     return;
@@ -504,6 +446,7 @@ async function handleAssistantChat(request, response) {
           "No web search was performed. Do not claim to have checked current sources.",
           false,
           studentMemory,
+          founderProfile,
         ),
       },
       ...cleanHistory(input.history).map(item => ({ role: item.role, content: item.content })),
@@ -649,7 +592,7 @@ async function handleAssistantChat(request, response) {
       },
       body: JSON.stringify({
         systemInstruction: {
-          parts: [{ text: buildTutorInstructions(language, grade, groundingEnabled, searchNotice, Boolean(imageInput), studentMemory) }],
+          parts: [{ text: buildTutorInstructions(language, grade, groundingEnabled, searchNotice, Boolean(imageInput), studentMemory, founderProfile) }],
         },
         contents,
         ...(groundingEnabled ? { tools: [{ google_search: {} }] } : {}),
