@@ -63,14 +63,17 @@ async function practice(href,grade,subject,language,returnLesson=null){
   await checkScope(grade,subject,language);
 }
 async function inlinePractice(lesson) {
-  await tap("#start-practice");await waitFor('document.getElementById("lesson-practice")?.hidden===false');
-  assert.equal(await evaluate('document.querySelectorAll("#lesson-practice .history-choice").length'),4);
+  await tap("#start-practice");
+  const practiceReady='document.getElementById("lesson-practice")?.hidden===false && (document.querySelectorAll("#lesson-practice .history-choice").length===4 || document.querySelector("#lesson-practice .lesson-practice-error"))';
+  await waitFor(practiceReady);
+  const initialChoices=await evaluate('document.querySelectorAll("#lesson-practice .history-choice").length');
+  assert.equal(initialChoices,4,`${lesson.id}: lesson practice did not load four choices (${await evaluate('document.querySelector("#lesson-practice .lesson-practice-error")?.textContent || document.getElementById("lesson-practice")?.textContent')})`);
   if(lesson.questions?.length) {
     await tap(`#lesson-practice .history-choice:nth-of-type(${lesson.questions[0].answer+1})`);
     await waitFor('document.querySelector("#lesson-practice .quiz-feedback")');
   }
   await tapLink("Back to lesson content","#lesson-practice a");await waitFor('document.getElementById("lesson-practice").hidden');
-  await tap("#start-practice");await waitFor('document.getElementById("lesson-practice")?.hidden===false');
+  await tap("#start-practice");await waitFor(practiceReady);
   if(lesson.questions?.length)assert.equal(await evaluate('[...document.querySelectorAll("#lesson-practice .history-choice")].every(button=>button.disabled)'),true,"returning to the content must not allow scoring the same answer twice");
   await tapLink("Back to lesson content","#lesson-practice a");
 }
