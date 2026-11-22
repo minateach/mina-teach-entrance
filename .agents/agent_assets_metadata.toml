@@ -42,3 +42,17 @@ mtime_ms = 1795354007173
 storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:d21f7a53-07e2-413b-b668-fe31619cf46b/7124a4fb-c894-46b7-9c98-733eb00cc869/8a4662c6-1a6f-449d-bd4c-2b533506f34d"
 storage_version_token = "1795355949734712"
 content_type = "image/png"
+
+[[outputs]]
+id = "rtbJEgcTWl6H9niFZf1rl"
+uri = "file://generated-artifacts/knowledge-base/general-knowledge-center-report.md"
+type = "text"
+title = "General Knowledge Center readiness report"
+description = "Source inventory, category coverage, review status, and tested app behavior."
+logical_id = "065987ec-8353-4ff6-ab2c-558809ca771e"
+content_hash = "sha256:07b72adf8bcb0940c66dcdffc6cf721cf476c1642246c1c7be244a850b59bbc6"
+size = 6463
+mtime_ms = 1795367775565
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:d21f7a53-07e2-413b-b668-fe31619cf46b/065987ec-8353-4ff6-ab2c-558809ca771e/2e37aa37-d059-4dd3-912d-b77fa64c6f84"
+storage_version_token = "1795367808827231"
+content_type = "text/markdown"
