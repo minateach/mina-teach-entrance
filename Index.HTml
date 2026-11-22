@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#F5F7FB">
+<link rel="icon" href="/images/mina-teach-ai-favicon.png" type="image/png">
+<link rel="manifest" href="/manifest.webmanifest">
 <title>MINA TEACH AI</title>
 
 <style>
@@ -57,9 +60,10 @@ button:hover{background:#1d5b96}
 #timer{color:#dc2626;font-weight:bold}
 footer{text-align:center;padding:20px;color:#64748b}
 </style>
+<link rel="stylesheet" href="/styles/mina-teach-theme.css">
 </head>
 
-<body>
+<body class="practice-prototype">
 
 <header>
 <img src="/images/0_1000107983_1794514022860.png" srcset="/images/mina-teach-ai-logo-256.png 256w, /images/mina-teach-ai-logo-512.png 512w, /images/mina-teach-ai-logo-1024.png 1024w" sizes="(max-width: 480px) 45vw, 170px" alt="Dambi Dollo University and Mina Teach AI logo" style="display:block;width:min(170px,45vw);height:auto;max-height:100px;object-fit:contain;margin:0 auto 12px">
@@ -524,9 +528,8 @@ function goHome(){
   border-radius: 8px;
 }
 </style>
-
 <section class="mina-dashboard">
-  <h2>📚 MINA TEACH AI LEARNING DASHBOARD</h2>
+  <h2>MINA TEACH AI LEARNING DASHBOARD</h2>
 
   <label>Select Grade</label>
   <select id="minaDashGrade">
@@ -555,7 +558,7 @@ function goHome(){
     <option>Environmental Science</option>
   </select>
 
-  <h3>📖 Learning Topics</h3>
+  <h3>Learning Topics</h3>
 
   <div id="minaDashTopics"></div>
 

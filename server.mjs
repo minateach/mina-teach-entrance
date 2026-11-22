@@ -807,6 +807,7 @@ function publicFilePath(pathname) {
   if (pathname === "/service-worker.js") return "service-worker.js";
   if (pathname === "/offline-status.js") return "offline-status.js";
   if (pathname === "/manifest.webmanifest") return "manifest.webmanifest";
+  if (pathname === "/styles/mina-teach-theme.css") return "styles/mina-teach-theme.css";
   if (pathname === "/privacy" || pathname === "/privacy/") return "privacy/index.html";
   if (pathname === "/terms" || pathname === "/terms/") return "terms/index.html";
   if (pathname.startsWith("/images/")) {

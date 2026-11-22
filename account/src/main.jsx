@@ -28,7 +28,7 @@ function deleteLocalAssistantImages() {
 const appearance = {
   theme: shadcn,
   options: { logoPlacement: "inside", logoLinkUrl: "/", logoImageUrl: `${window.location.origin}/images/0_1000107983_1794514022860.png` },
-  variables: { colorPrimary: "#1d4c9c", colorForeground: "#172541", colorBackground: "#ffffff", colorInput: "#ffffff", colorInputForeground: "#172541", colorDanger: "#b42318", colorNeutral: "#53627b", fontFamily: "Inter, system-ui, sans-serif", borderRadius: "0.75rem" },
+  variables: { colorPrimary: "#123B70", colorForeground: "#173451", colorBackground: "#F5F7FB", colorInput: "#FFFFFF", colorInputForeground: "#173451", colorDanger: "#A84B42", colorNeutral: "#637990", fontFamily: "DM Sans, sans-serif", borderRadius: "0.75rem" },
 };
 function stripBase(path) { return basePath && path.startsWith(basePath) ? path.slice(basePath.length) || "/" : path; }
 
