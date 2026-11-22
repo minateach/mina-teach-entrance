@@ -78,6 +78,17 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
 .text-button { padding: 9px 11px; border: 0; color: #63738a; background: transparent; font-size: 11px; font-weight: 700; }
 .usage-note, .privacy-note { color: #7b8797; font-size: 10px; line-height: 1.55; }
 .usage-note { margin: 14px 0 8px; }
+.local-image-tools, .video-tools { margin: 18px 0; padding: 14px; border: 1px solid #d8e5f5; border-radius: 13px; background: #f6faff; }
+.local-image-tools h2, .video-tools h2 { margin: 0 0 7px; color: #193d76; font-size: 14px; }
+.local-image-tools p, .video-tools>p:not(.eyebrow) { margin: 0 0 12px; color: #61738d; font-size: 11px; line-height: 1.55; }
+.local-adjustments, .video-trim-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 10px 0; }
+.local-adjustments label, .video-trim-controls label { display: grid; gap: 6px; color: #304c70; font-size: 11px; font-weight: 700; }
+.local-adjustments input { width: 100%; }
+.local-tool-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.video-tools { max-width: 1320px; margin: 20px auto; padding: 20px clamp(14px,3vw,38px); background: white; box-shadow: 0 10px 35px #173a630b; }
+.video-tools input[type="file"], .video-trim-controls input { display: block; width: 100%; margin-top: 6px; padding: 9px; border: 1px solid #d4dfec; border-radius: 9px; background: #fff; }
+.video-tools video { display: block; width: min(100%, 740px); max-height: 420px; margin: 14px 0; border-radius: 12px; background: #10234b; }
+.video-tools .secondary-button { display: inline-block; margin: 10px 0 0; text-decoration: none; }
 .studio-status { min-height: 38px; margin: 10px 0 0; padding: 9px 11px; border: 1px solid #e0e8f2; border-radius: 10px; color: #47617f; background: #f7faff; font-size: 11px; line-height: 1.45; }
 .studio-status[data-state="error"] { border-color: #f1d0c8; color: #8a3c34; background: #fff6f3; }
 .studio-status[data-state="success"] { border-color: #c8e6d6; color: #236b4e; background: #f2fbf6; }
@@ -124,6 +135,8 @@ footer { padding: 18px 4px 0; color: #71819a; text-align: center; font-size: 10p
   .preview-grid { gap: 7px; }
   .preview-frame { min-height: 170px; }
   .preview-frame img { max-height: 220px; }
+  .local-adjustments, .video-trim-controls { grid-template-columns: 1fr; }
+  .video-tools { margin: 14px 12px; padding: 15px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

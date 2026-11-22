@@ -21,6 +21,19 @@ const elements = {
   previewGrid: document.getElementById("previewGrid"),
   downloadButton: document.getElementById("downloadButton"),
   shareButton: document.getElementById("shareButton"),
+  localBrightness: document.getElementById("localBrightness"),
+  localContrast: document.getElementById("localContrast"),
+  rotateLocalImage: document.getElementById("rotateLocalImage"),
+  grayscaleLocalImage: document.getElementById("grayscaleLocalImage"),
+  applyLocalImageEdits: document.getElementById("applyLocalImageEdits"),
+  resetLocalImageEdits: document.getElementById("resetLocalImageEdits"),
+  videoFile: document.getElementById("videoFile"),
+  videoPreview: document.getElementById("videoPreview"),
+  videoTrimStart: document.getElementById("videoTrimStart"),
+  videoTrimEnd: document.getElementById("videoTrimEnd"),
+  trimVideo: document.getElementById("trimVideo"),
+  downloadVideo: document.getElementById("downloadVideo"),
+  videoStatus: document.getElementById("videoStatus"),
 };
 
 let mode = "edit";
@@ -29,6 +42,11 @@ let sourceUrl = "";
 let resultUrl = "";
 let resultBlob = null;
 let isProcessing = false;
+let localRotation = 0;
+let localGrayscale = false;
+let videoSourceUrl = "";
+let videoResultUrl = "";
+let videoIsProcessing = false;
 
 function setStatus(message, state = "ready") {
   elements.studioStatus.textContent = message;
@@ -112,10 +130,52 @@ async function selectFile(file) {
     elements.sourcePlaceholder.hidden = true;
     elements.previewState.textContent = `${prepared.name} · ${(prepared.size / (1024 * 1024)).toFixed(1)} MB`;
     clearResult();
+    localRotation = 0;
+    localGrayscale = false;
+    elements.localBrightness.value = "100";
+    elements.localContrast.value = "100";
+    for (const button of [elements.rotateLocalImage, elements.grayscaleLocalImage, elements.applyLocalImageEdits, elements.resetLocalImageEdits]) button.disabled = false;
     setStatus("Photo prepared on this device. Enter an edit instruction.", "ready");
     updateRunButton();
   } catch (error) {
     setStatus(error.message || "This image could not be prepared.", "error");
+  }
+}
+
+async function applyLocalImageEdits() {
+  if (!sourceFile) {
+    setStatus("Choose a photo before applying offline edits.", "error");
+    return;
+  }
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(sourceFile);
+    const rotated = Math.abs(localRotation % 180) === 90;
+    const canvas = document.createElement("canvas");
+    canvas.width = rotated ? bitmap.height : bitmap.width;
+    canvas.height = rotated ? bitmap.width : bitmap.height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("This browser cannot edit the image on this device.");
+    context.filter = `brightness(${elements.localBrightness.value}%) contrast(${elements.localContrast.value}%)${localGrayscale ? " grayscale(1)" : ""}`;
+    context.translate(canvas.width / 2, canvas.height / 2);
+    context.rotate(localRotation * Math.PI / 180);
+    context.drawImage(bitmap, -bitmap.width / 2, -bitmap.height / 2);
+    const blob = await new Promise((resolve, reject) => {
+      canvas.toBlob(value => value ? resolve(value) : reject(new Error("The edited image could not be prepared.")), "image/jpeg", 0.92);
+    });
+    clearUrl(resultUrl);
+    resultBlob = blob;
+    resultUrl = URL.createObjectURL(blob);
+    elements.resultPreview.src = resultUrl;
+    elements.resultPreview.hidden = false;
+    elements.resultPlaceholder.hidden = true;
+    elements.resultActions.hidden = false;
+    elements.previewState.textContent = `${canvas.width} × ${canvas.height} · Edited on this device`;
+    setStatus("Offline photo edit is ready. The original image remains unchanged.", "success");
+  } catch (error) {
+    setStatus(error.message || "The photo could not be edited on this device.", "error");
+  } finally {
+    bitmap?.close?.();
   }
 }
 
@@ -139,10 +199,99 @@ function resetStudio() {
   elements.sourcePreview.hidden = true;
   elements.sourcePlaceholder.hidden = false;
   elements.promptInput.value = "";
+  localRotation = 0;
+  localGrayscale = false;
+  elements.localBrightness.value = "100";
+  elements.localContrast.value = "100";
+  for (const button of [elements.rotateLocalImage, elements.grayscaleLocalImage, elements.applyLocalImageEdits, elements.resetLocalImageEdits]) button.disabled = true;
   updateCount();
   clearResult();
   elements.previewState.textContent = mode === "edit" ? "Choose a photo to begin" : "Text-to-image";
   setStatus(mode === "edit" ? "Choose a photo or switch to create mode." : "Describe the image you want to create.", "ready");
+}
+
+function setVideoStatus(message, state = "ready") {
+  elements.videoStatus.textContent = message;
+  elements.videoStatus.dataset.state = state;
+}
+
+function supportsVideoTrim() {
+  return Boolean(
+    HTMLMediaElement.prototype.captureStream || HTMLMediaElement.prototype.mozCaptureStream
+  ) && typeof MediaRecorder === "function";
+}
+
+function updateVideoTrimButton() {
+  const start = Number(elements.videoTrimStart.value);
+  const end = Number(elements.videoTrimEnd.value);
+  elements.trimVideo.disabled = videoIsProcessing || !elements.videoPreview.src || !Number.isFinite(start) ||
+    !Number.isFinite(end) || start < 0 || end <= start || end > elements.videoPreview.duration ||
+    !supportsVideoTrim();
+}
+
+async function trimVideoOffline() {
+  const video = elements.videoPreview;
+  const start = Number(elements.videoTrimStart.value), end = Number(elements.videoTrimEnd.value);
+  if (!supportsVideoTrim()) {
+    setVideoStatus("This browser cannot record a local video trim. No upload was made.", "error");
+    return;
+  }
+  if (!Number.isFinite(video.duration) || end <= start || end > video.duration) {
+    setVideoStatus("Choose a valid start and end time within the video.", "error");
+    return;
+  }
+  videoIsProcessing = true;
+  updateVideoTrimButton();
+  setVideoStatus("Trimming locally. Keep this page open until export finishes…");
+  try {
+    if (Math.abs(video.currentTime - start) > 0.05) {
+      const seeked = new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("The video did not seek to the selected start time.")), 10000);
+        video.addEventListener("seeked", () => { clearTimeout(timer); resolve(); }, { once: true });
+      });
+      video.currentTime = start;
+      await seeked;
+    }
+    const stream = (video.captureStream || video.mozCaptureStream).call(video);
+    const preferred = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"]
+      .find(type => MediaRecorder.isTypeSupported(type));
+    if (!preferred) throw new Error("This browser has no supported local WebM recording format.");
+    const recorder = new MediaRecorder(stream, { mimeType: preferred });
+    const chunks = [];
+    const finished = new Promise((resolve, reject) => {
+      recorder.ondataavailable = event => { if (event.data?.size) chunks.push(event.data); };
+      recorder.onerror = () => reject(new Error("The browser could not finish recording this local video."));
+      recorder.onstop = () => resolve(new Blob(chunks, { type: recorder.mimeType || "video/webm" }));
+    });
+    const stopAtEnd = () => {
+      if (video.currentTime >= end && recorder.state === "recording") {
+        video.pause();
+        recorder.stop();
+      }
+    };
+    video.addEventListener("timeupdate", stopAtEnd);
+    recorder.start(200);
+    await video.play();
+    const safetyTimer = setTimeout(() => {
+      if (recorder.state === "recording") { video.pause(); recorder.stop(); }
+    }, Math.max(1000, (end - start) * 1000 + 2500));
+    const blob = await finished;
+    clearTimeout(safetyTimer);
+    video.removeEventListener("timeupdate", stopAtEnd);
+    for (const track of stream.getTracks()) track.stop();
+    if (!blob.size) throw new Error("The selected clip produced no video data.");
+    clearUrl(videoResultUrl);
+    videoResultUrl = URL.createObjectURL(blob);
+    elements.downloadVideo.href = videoResultUrl;
+    elements.downloadVideo.download = "mina-teach-trimmed-video.webm";
+    elements.downloadVideo.hidden = false;
+    setVideoStatus(`Trim complete · ${(blob.size / 1024 / 1024).toFixed(1)} MB WebM saved locally.`, "success");
+  } catch (error) {
+    setVideoStatus(error.message || "The video could not be trimmed locally.", "error");
+  } finally {
+    videoIsProcessing = false;
+    updateVideoTrimButton();
+  }
 }
 
 function dataUrlToBlob(dataUrl) {
@@ -247,6 +396,50 @@ elements.runButton.addEventListener("click", runImageRequest);
 elements.resetButton.addEventListener("click", resetStudio);
 elements.downloadButton.addEventListener("click", downloadResult);
 elements.shareButton.addEventListener("click", () => void shareResult());
+elements.rotateLocalImage.addEventListener("click", () => { localRotation = (localRotation + 90) % 360; });
+elements.grayscaleLocalImage.addEventListener("click", () => {
+  localGrayscale = !localGrayscale;
+  elements.grayscaleLocalImage.textContent = localGrayscale ? "Color photo" : "Grayscale";
+});
+elements.applyLocalImageEdits.addEventListener("click", () => void applyLocalImageEdits());
+elements.resetLocalImageEdits.addEventListener("click", () => {
+  localRotation = 0; localGrayscale = false;
+  elements.localBrightness.value = "100"; elements.localContrast.value = "100";
+  elements.grayscaleLocalImage.textContent = "Grayscale";
+  void applyLocalImageEdits();
+});
+elements.videoFile.addEventListener("change", () => {
+  const file = elements.videoFile.files?.[0];
+  clearUrl(videoSourceUrl); clearUrl(videoResultUrl); videoResultUrl = "";
+  elements.downloadVideo.hidden = true;
+  if (!file) { elements.videoPreview.removeAttribute("src"); updateVideoTrimButton(); return; }
+  if (!file.type.startsWith("video/") || file.size > 200 * 1024 * 1024) {
+    setVideoStatus("Choose a video file smaller than 200 MB.", "error");
+    elements.videoFile.value = ""; return;
+  }
+  videoSourceUrl = URL.createObjectURL(file);
+  elements.videoPreview.src = videoSourceUrl;
+  elements.videoPreview.hidden = false;
+  elements.videoPreview.onloadedmetadata = () => {
+    elements.videoTrimStart.value = "0";
+    elements.videoTrimEnd.value = String(Math.floor(elements.videoPreview.duration * 10) / 10);
+    elements.videoTrimStart.disabled = false; elements.videoTrimEnd.disabled = false;
+    if (elements.videoPreview.duration > 600) {
+      setVideoStatus("Clips longer than 10 minutes are not supported by this offline tool.", "error");
+      elements.videoTrimEnd.value = "600";
+    } else if (supportsVideoTrim()) {
+      setVideoStatus("Video loaded on this device. Select a clip range to trim offline.");
+    } else {
+      setVideoStatus("This browser does not support offline video trimming. Your video was not uploaded.", "error");
+    }
+    updateVideoTrimButton();
+  };
+  elements.videoPreview.onerror = () => setVideoStatus("This browser cannot open the selected video format.", "error");
+});
+elements.videoTrimStart.addEventListener("input", updateVideoTrimButton);
+elements.videoTrimEnd.addEventListener("input", updateVideoTrimButton);
+elements.videoPreview.addEventListener("loadedmetadata", updateVideoTrimButton);
+elements.trimVideo.addEventListener("click", () => void trimVideoOffline());
 document.querySelectorAll("[data-prompt]").forEach(button => {
   button.addEventListener("click", () => {
     elements.promptInput.value = button.dataset.prompt || "";
@@ -257,3 +450,5 @@ document.querySelectorAll("[data-prompt]").forEach(button => {
 
 updateCount();
 setMode("edit");
+if (supportsVideoTrim()) setVideoStatus("Local WebM trimming is available in this browser.");
+else setVideoStatus("Offline video trimming is not supported by this browser. Basic photo edits still work offline.");

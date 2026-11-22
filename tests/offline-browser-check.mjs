@@ -30,6 +30,17 @@ try {
   await evaluate('document.querySelector(".lesson-page button").textContent.includes("Save lesson") && [...document.querySelectorAll(".lesson-page button")].find(button=>button.textContent.includes("Download for offline"))?.click()');
   await waitFor('document.querySelector(".lesson-page").innerText.includes("Available offline")');
   assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true,"lesson view fits Android width");
+  await navigate("/learning/?grade=10&subject=History&language=en",
+    'document.querySelector(".course-card button[aria-label=\\"Download Grade 10 History offline\\"]")');
+  await evaluate('document.querySelector(".course-card button[aria-label=\\"Download Grade 10 History offline\\"]').click()');
+  await waitFor('document.getElementById("offline-bulk-status").textContent.includes("lessons saved offline")');
+  assert.equal(await evaluate('document.getElementById("offline-storage-usage").textContent.includes("40 MB")'),true,"device storage usage and capacity are displayed");
+  await evaluate('const t=document.getElementById("offline-mode-toggle");t.checked=true;t.dispatchEvent(new Event("change",{bubbles:true}))');
+  assert.equal(await evaluate('localStorage.getItem("minaTeach.offlineMode.v1")==="on"'),true,"Offline Mode setting is saved");
+  await navigate(lessonUrl,'document.getElementById("lesson-page") && document.querySelector(".lesson-page h2")');
+  assert.match(await evaluate('document.getElementById("offline-connection-status").textContent'),/Offline Mode is on/);
+  assert.match(await evaluate('document.querySelector(".lesson-page").textContent'),/Complete lesson notes|Introduction/);
+  await evaluate('const t=document.getElementById("offline-mode-toggle");t.checked=false;t.dispatchEvent(new Event("change",{bubbles:true}))');
   await setOffline(true);
   await navigate(lessonUrl,'document.getElementById("lesson-page") && document.querySelector(".lesson-page h2")');
   assert.match(await evaluate('document.getElementById("offline-connection-status").textContent'),/Offline/);

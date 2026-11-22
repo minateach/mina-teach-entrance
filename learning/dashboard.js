@@ -1,6 +1,6 @@
 import {api,createStore,topicIsComplete} from "./learning-state.js";
 import {node,lessonUrl,courseUrl,practiceUrl,topicParams,renderLesson} from "./lesson-view.js";
-import {listOfflineDownloads,removeOfflineDownload} from "./offline-store.js";
+import {getOfflineStorageUsage,listOfflineDownloads,makeOfflineCourseDownload,makeOfflineGradeDownload,removeOfflineDownload} from "./offline-store.js";
 
 const $=id=>document.getElementById(id);
 const store=createStore(message=>{$("sync-status").textContent=message;});
@@ -70,13 +70,16 @@ function renderSaved() {
 async function renderOfflineDownloads() {
   const box=$("offline-download-list");box.replaceChildren();
   try {
-    const downloads=(await listOfflineDownloads()).filter(item=>item.type==="lesson");
-    if(!downloads.length){box.append(node("p","No lessons downloaded yet. Open a lesson while online and select “Download for offline”.","muted"));return;}
+    const [downloads,usage]=await Promise.all([listOfflineDownloads(),getOfflineStorageUsage()]);
+    $("offline-storage-usage").textContent=`${(usage.bytes/1024/1024).toFixed(1)} MB / ${(usage.limitBytes/1024/1024).toFixed(0)} MB · ${usage.lessonCount} lessons · ${usage.questionSetCount} question sets`;
+    if(!downloads.length){box.append(node("p","No offline downloads yet. Open a lesson or practice page while online to save content.","muted"));return;}
     downloads.forEach(item=>{
       const row=node("div",undefined,"saved-chip");
       const message=node("p",`${(item.bytes/1024/1024).toFixed(1)} MB · saved on this device`,"muted");
       const metadata=item.data || {};
-      const open=link(item.title,lessonUrl({id:metadata.id,grade:metadata.grade,subject:metadata.subject,language:metadata.language}));
+      const open=item.type==="lesson"
+        ? link(item.title,lessonUrl({id:metadata.id,grade:metadata.grade,subject:metadata.subject,language:metadata.language}))
+        : node("p",item.title);
       const remove=button("Remove download",async()=>{
         remove.disabled=true;
         try {await removeOfflineDownload(item.resourceKey);await renderOfflineDownloads();}
@@ -85,6 +88,19 @@ async function renderOfflineDownloads() {
       row.append(open,remove,message);box.append(row);
     });
   } catch(error) {box.append(node("p",error.message,"notice"));}
+}
+async function downloadSubject(subject, buttonNode) {
+  const status=$("offline-bulk-status");
+  buttonNode.disabled=true;status.textContent=`Downloading available Grade ${scope.grade} ${subject} lessons…`;
+  try {
+    const result=await makeOfflineCourseDownload({
+      grade:scope.grade,subject,language:scope.language,
+      onProgress:progress=>{status.textContent=`${subject}: saved ${progress.completed} of ${progress.total} lessons. Current: ${progress.title}`;},
+    });
+    status.textContent=`${subject}: ${result.completed} of ${result.total} lessons saved offline.${result.errors.length?` ${result.errors.length} could not be saved; ${result.errors[0]}`:""}`;
+    await renderOfflineDownloads();
+  } catch(error) {status.textContent=error.message;}
+  finally {buttonNode.disabled=false;}
 }
 function renderTasks() {
   $("task-list").replaceChildren();
@@ -133,6 +149,9 @@ function renderDashboard() {
       a.append(node("small",`${studied}/${topicKeys.length} topics studied · ${topicKeys.length-studied} remaining`));
     }
     wrapper.append(a);
+    const downloadSubjectButton=button("Download subject offline",()=>downloadSubject(subject.name,downloadSubjectButton));
+    downloadSubjectButton.setAttribute("aria-label",`Download Grade ${scope.grade} ${subject.name} offline`);
+    wrapper.append(downloadSubjectButton);
     if(subject.startLessonId)wrapper.append(link("Start learning",lessonUrl({...target,id:subject.startLessonId}),"subject-open"));
     appendPracticeLinks(wrapper,subject);
     root.append(wrapper);
@@ -275,6 +294,19 @@ for(const id of ["grade","stream","language"])$(id).addEventListener("change",()
 });
 $("retry-sync").addEventListener("click",async()=>{await store.retry();await loadPage();});
 $("refresh-learning").addEventListener("click",()=>loadPage(true));
+$("download-grade-offline").addEventListener("click",async event=>{
+  const buttonNode=event.currentTarget,status=$("offline-bulk-status");
+  buttonNode.disabled=true;status.textContent=`Downloading available Grade ${scope?.grade || $("grade").value} lessons…`;
+  try {
+    const result=await makeOfflineGradeDownload({
+      grade:scope?.grade || Number($("grade").value),language:scope?.language || $("language").value,
+      onProgress:progress=>{status.textContent=`${progress.subject}: saved ${progress.completed} of ${progress.total} lessons. Current: ${progress.title}`;},
+    });
+    status.textContent=`Grade ${scope?.grade || $("grade").value}: ${result.completed} of ${result.total} lessons saved across ${result.subjectCount} subjects.${result.errors.length?` ${result.errors.length} items could not be saved; ${result.errors[0]}`:""}`;
+    await renderOfflineDownloads();
+  } catch(error) {status.textContent=error.message;}
+  finally {buttonNode.disabled=false;}
+});
 $("lesson-subject-filter").addEventListener("change",()=>loadLibrary());
 $("lesson-language").addEventListener("change",()=>loadLibrary());
 $("load-more-lessons").addEventListener("click",()=>loadLibrary(true));

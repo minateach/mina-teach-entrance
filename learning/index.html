@@ -39,6 +39,7 @@
         <label>Language
           <select id="language"><option value="en">English</option><option value="om">Afaan Oromoo</option><option value="am">Amharic</option></select>
         </label>
+      <button id="download-grade-offline" type="button" class="button-secondary">Download Grade offline</button>
       </div>
     </section>
     <section class="sync-notice" aria-label="Learning storage status">
@@ -46,6 +47,7 @@
       <button id="retry-sync" type="button" class="button-secondary">Retry sync</button>
       <button id="refresh-learning" type="button" class="button-secondary">Refresh content</button>
       <a href="/account/">Sign in / Account</a>
+      <p id="offline-bulk-status" role="status"></p>
     </section>
     <p id="coverage-status" class="muted" role="status">Loading available lesson counts…</p>
     <p id="topic-coverage-status" class="muted" role="status">Loading available topic counts…</p>
@@ -94,8 +96,8 @@
       <div id="saved-lessons" class="saved-list"><p class="muted">Save a lesson from a subject to find it here.</p></div>
     </section>
     <section class="panel saved-panel" aria-labelledby="offline-downloads-title">
-      <div class="section-heading"><div><p class="eyebrow">STUDY WITHOUT INTERNET</p><h2 id="offline-downloads-title">Offline downloads</h2></div></div>
-      <p class="muted">Only complete lessons you choose to download appear here. Downloads stay on this device.</p>
+      <div class="section-heading"><div><p class="eyebrow">STUDY WITHOUT INTERNET</p><h2 id="offline-downloads-title">Offline downloads</h2></div><strong id="offline-storage-usage">Checking device storage…</strong></div>
+      <p class="muted">Downloaded lessons, question banks, and device-only results stay on this device. Use the controls on each subject to download its available lessons.</p>
       <div id="offline-download-list" class="saved-list" role="status">Loading offline downloads…</div>
     </section>
     <section class="panel saved-panel" aria-labelledby="quiz-progress-title">

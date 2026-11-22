@@ -2,7 +2,17 @@ const DATABASE = "mina-teach-offline";
 const DATABASE_VERSION = 1;
 const STORE = "downloads";
 const OWNER_KEY = "minaTeach.offline.owner.v1";
+const OFFLINE_MODE_KEY = "minaTeach.offlineMode.v1";
 const MAX_OWNER_BYTES = 40 * 1024 * 1024;
+
+function assertOnlineDownloadAllowed() {
+  let offlineMode = false;
+  try { offlineMode = localStorage.getItem(OFFLINE_MODE_KEY) === "on"; } catch {}
+  if (offlineMode) throw new Error("Turn off Offline Mode and reconnect before downloading new content.");
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    throw new Error("Connect to the internet to download new offline content.");
+  }
+}
 
 function database() {
   return new Promise((resolve, reject) => {
@@ -123,6 +133,23 @@ export async function listOfflineDownloads(owner = getOfflineOwner()) {
   }
 }
 
+export async function getOfflineStorageUsage(owner = getOfflineOwner()) {
+  const normalizedOwner = safeOwner(owner);
+  const db = await database();
+  let stored;
+  try { stored = (await allRecords(db)).filter(record => record.owner === normalizedOwner); }
+  finally { db.close(); }
+  const records = stored.filter(record => !["learning-state", "bookmarks"].includes(record.type));
+  return {
+    bytes: stored.reduce((total, record) => total + (Number(record.bytes) || 0), 0),
+    limitBytes: MAX_OWNER_BYTES,
+    lessonCount: records.filter(record => record.type === "lesson").length,
+    questionSetCount: records.filter(record => record.type === "question-set").length,
+    resultCount: records.filter(record => record.type === "exam-result").length,
+    downloadCount: records.length,
+  };
+}
+
 export async function removeOfflineDownload(key, owner = getOfflineOwner()) {
   const db = await database();
   try {
@@ -202,9 +229,7 @@ export async function getOfflineDownload(key, owner = getOfflineOwner()) {
 }
 
 export async function makeOfflineLessonDownload({ id, grade, subject, language = "en", owner = getOfflineOwner() }) {
-  if (typeof navigator !== "undefined" && !navigator.onLine) {
-    throw new Error("Connect to the internet to download or refresh this lesson.");
-  }
+  assertOnlineDownloadAllowed();
   const params = new URLSearchParams({ grade: String(grade), language });
   const courseParams = new URLSearchParams({ grade: String(grade), language, subject });
   const paths = [
@@ -265,6 +290,68 @@ export async function makeOfflineLessonDownload({ id, grade, subject, language =
     owner, key, type: "lesson", title: `Grade ${grade} · ${subject} · ${lesson.title}`,
     responses, data: { id, grade: Number(grade), subject, language, title: lesson.title, missingAssets },
   });
+}
+
+export async function makeOfflineCourseDownload({ grade, subject, language = "en", owner = getOfflineOwner(), onProgress = () => {} }) {
+  assertOnlineDownloadAllowed();
+  const params = new URLSearchParams({ grade: String(grade), language, subject });
+  const response = await fetch(`/api/learning/course?${params}`, {
+    credentials: "same-origin", cache: "no-store",
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.error?.message || "The subject outline could not be downloaded.");
+  }
+  const course = await response.json();
+  const lessons = (course.chapters || []).flatMap(chapter => chapter.lessons || []);
+  if (!lessons.length) throw new Error(`No published lessons are available for Grade ${grade} ${subject}.`);
+  const errors = [];
+  let completed = 0;
+  for (const lesson of lessons) {
+    try {
+      await makeOfflineLessonDownload({ id: lesson.id, grade, subject, language, owner });
+      completed += 1;
+    } catch (error) {
+      errors.push(`${lesson.title}: ${error.message}`);
+    }
+    onProgress({ completed, total: lessons.length, title: lesson.title });
+    if (errors.some(message => message.includes("Offline storage is full"))) break;
+  }
+  return { completed, total: lessons.length, errors };
+}
+
+export async function makeOfflineGradeDownload({ grade, language = "en", owner = getOfflineOwner(), onProgress = () => {} }) {
+  assertOnlineDownloadAllowed();
+  const params = new URLSearchParams({ grade: String(grade), language });
+  const response = await fetch(`/api/learning/catalog?${params}`, {
+    credentials: "same-origin", cache: "no-store",
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.error?.message || "The grade catalog could not be downloaded.");
+  }
+  const catalog = await response.json();
+  const subjects = catalog.subjects || [];
+  if (!subjects.length) throw new Error(`No subject catalog is available for Grade ${grade}.`);
+  let completed = 0;
+  let total = 0;
+  const errors = [];
+  for (const subject of subjects) {
+    try {
+      const result = await makeOfflineCourseDownload({
+        grade, subject: subject.name, language, owner,
+        onProgress: progress => {
+          onProgress({ subject: subject.name, ...progress });
+        },
+      });
+      completed += result.completed;
+      total += result.total;
+      errors.push(...result.errors);
+    } catch (error) {
+      errors.push(`${subject.name}: ${error.message}`);
+    }
+  }
+  return { completed, total, subjectCount: subjects.length, errors };
 }
 
 export function questionSetKey(selection, limit) {

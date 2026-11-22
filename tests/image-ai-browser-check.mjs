@@ -114,6 +114,15 @@ try {
   await waitFor('document.readyState==="complete" && document.getElementById("runButton")');
   await setFile("#galleryInput");
   await waitFor('!document.getElementById("sourcePreview").hidden');
+  await command("Network.emulateNetworkConditions", {offline:true,latency:0,downloadThroughput:0,uploadThroughput:0});
+  await waitFor("navigator.onLine===false");
+  await evaluate("const t=document.getElementById('offline-mode-toggle');t.checked=true;t.dispatchEvent(new Event('change',{bubbles:true}));document.getElementById('rotateLocalImage').click();document.getElementById('grayscaleLocalImage').click();document.getElementById('applyLocalImageEdits').click()");
+  await waitFor('document.getElementById("studioStatus").textContent.includes("Offline photo edit is ready")');
+  assert.match(await evaluate("document.getElementById('previewState').textContent"),/Edited on this device/);
+  assert.equal(studioPayloads.length,0,"basic image edit does not call the AI service while offline");
+  await command("Network.emulateNetworkConditions", {offline:false,latency:0,downloadThroughput:10_000_000,uploadThroughput:10_000_000});
+  await waitFor("navigator.onLine===true");
+  await evaluate("const t=document.getElementById('offline-mode-toggle');t.checked=false;t.dispatchEvent(new Event('change',{bubbles:true}))");
   await evaluate("document.getElementById('promptInput').value='Improve the lighting while preserving the subject';document.getElementById('promptInput').dispatchEvent(new Event('input'));document.getElementById('runButton').click()");
   await waitFor('!document.getElementById("resultPreview").hidden');
   assert.equal(studioPayloads[0].mode, "edit");
@@ -126,6 +135,18 @@ try {
   await evaluate(`window.__imageShareCount = 0;Object.defineProperty(navigator,"canShare",{configurable:true,value:()=>true});Object.defineProperty(navigator,"share",{configurable:true,value:async()=>{window.__imageShareCount+=1;}});document.getElementById("shareButton").click();`);
   await waitFor("window.__imageShareCount===1");
 
+  const videoSupported=await evaluate("Boolean((HTMLMediaElement.prototype.captureStream||HTMLMediaElement.prototype.mozCaptureStream)&&typeof MediaRecorder==='function'&&['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'].some(type=>MediaRecorder.isTypeSupported(type)))");
+  if(videoSupported){
+    const generated=await evaluate(`(async()=>{const canvas=document.createElement('canvas');canvas.width=160;canvas.height=90;const ctx=canvas.getContext('2d'),stream=canvas.captureStream(8),recorder=new MediaRecorder(stream,{mimeType:'video/webm'}),chunks=[];recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};const stopped=new Promise(resolve=>recorder.onstop=()=>resolve(new Blob(chunks,{type:recorder.mimeType})));recorder.start(100);let frame=0;const draw=setInterval(()=>{ctx.fillStyle=frame++%2?'#2563eb':'#ef4444';ctx.fillRect(0,0,160,90)},100);await new Promise(resolve=>setTimeout(resolve,1600));clearInterval(draw);recorder.stop();const blob=await stopped;for(const track of stream.getTracks())track.stop();const transfer=new DataTransfer();transfer.items.add(new File([blob],'sample.webm',{type:'video/webm'}));const input=document.getElementById('videoFile');input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));return {bytes:blob.size,type:blob.type}})()`);
+    assert.ok(generated.bytes>0,"test video was created locally in the browser");
+    await waitFor('Number.isFinite(document.getElementById("videoPreview").duration) && document.getElementById("videoPreview").duration>0');
+    await evaluate("document.getElementById('videoTrimEnd').value='0.5';document.getElementById('videoTrimEnd').dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('trimVideo').click()");
+    await waitFor('!document.getElementById("downloadVideo").hidden');
+    assert.match(await evaluate("document.getElementById('videoStatus').textContent"),/Trim complete/,"offline video clip is exported in the browser");
+  } else {
+    assert.match(await evaluate("document.getElementById('videoStatus').textContent"),/does not support offline video trimming/);
+  }
+
   await evaluate("document.getElementById('createModeTab').click()");
   assert.equal(await evaluate("document.getElementById('sourcePanel').hidden"), true, "create mode hides the unused source panel");
   await evaluate("document.getElementById('promptInput').value='Create a simple science illustration';document.getElementById('promptInput').dispatchEvent(new Event('input'));document.getElementById('runButton').click()");
@@ -137,7 +158,7 @@ try {
   });
   assert.equal(await evaluate("document.documentElement.scrollWidth<=innerWidth"), true, "Image Studio fits desktop width");
   assert.deepEqual(browser.exceptions, []);
-  console.log("PASS: Android-sized assistant photo upload, local preview/removal, private local history, follow-up image context, Image Studio editing and generation, download/share actions, and mobile/desktop overflow checks.");
+  console.log(`PASS: Android-sized assistant photo upload, offline local photo edits, ${videoSupported?"offline video trim":"video capability detection"}, private local history, follow-up image context, AI Image Studio editing and generation, download/share actions, and mobile/desktop overflow checks.`);
 } finally {
   await browser.close();
   await rm(tempDirectory, { recursive: true, force: true });

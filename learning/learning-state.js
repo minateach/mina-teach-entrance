@@ -3,6 +3,16 @@ import {cachedApiResponse,getOfflineLearningState,getOfflineOwner,listOfflineExa
 export const STORAGE_KEY = "minaTeach.learning.v1";
 export async function api(url, options={}) {
   const method=String(options.method || "GET").toUpperCase();
+  const offlineMode=typeof window!=="undefined" && window.MinaOfflineMode?.enabled?.() || false;
+  if(offlineMode) {
+    if(method==="GET") {
+      const target=new URL(url,location.origin);
+      const cached=await cachedApiResponse(target.pathname+target.search).catch(()=>null);
+      if(cached!==null)return cached;
+      throw new Error("Offline Mode is on. This content is not downloaded on this device yet. Turn it off and connect to download it first.");
+    }
+    throw new Error("Offline Mode is on. Account actions and synchronization need internet; your local learning changes are kept.");
+  }
   let response;
   try {
     response=await fetch(url,{credentials:"same-origin",cache:"no-store",...options,headers:{"Content-Type":"application/json",...options.headers}});

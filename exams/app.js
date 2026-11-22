@@ -6,6 +6,9 @@
   const examStorageKey="mina-teach-active-exam-v1";
   let countVersion=0,initialFilterError="",selection=null,pendingSaved=null,starting=false,invalidSavedState=false;
   async function api(url, options={}) {
+    if(window.MinaOfflineMode?.enabled?.()) {
+      throw new Error("Offline Mode is on. Account features need internet; downloaded practice remains available on this device.");
+    }
     const response = await fetch(url, { credentials:"same-origin", ...options, headers:{"Content-Type":"application/json",...(options.headers||{})} });
     const body = await response.json();
     if (!response.ok) { const error = new Error(body?.error?.message || "Request failed."); error.status=response.status; throw error; }

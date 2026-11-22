@@ -60,6 +60,20 @@
                   <button type="button" data-prompt="Replace the background with a clean, softly lit light-blue studio backdrop. Keep the main subject unchanged.">Replace background</button>
                   <button type="button" data-prompt="Restyle this image as a detailed watercolor illustration while preserving the main subject and important details.">Watercolor style</button>
                 </div>
+                <section class="local-image-tools" aria-label="Offline image editing tools">
+                  <h2>Basic photo edits on this device</h2>
+                  <p>Rotate, adjust brightness and contrast, or make the photo grayscale. These edits work offline and do not upload your image.</p>
+                  <div class="local-adjustments">
+                    <label>Brightness <input id="localBrightness" type="range" min="50" max="150" value="100"></label>
+                    <label>Contrast <input id="localContrast" type="range" min="50" max="150" value="100"></label>
+                  </div>
+                  <div class="local-tool-actions">
+                    <button type="button" class="secondary-button" id="rotateLocalImage" disabled>Rotate 90°</button>
+                    <button type="button" class="secondary-button" id="grayscaleLocalImage" disabled>Grayscale</button>
+                    <button type="button" class="secondary-button" id="applyLocalImageEdits" disabled>Apply edits offline</button>
+                    <button type="button" class="secondary-button" id="resetLocalImageEdits" disabled>Reset edits</button>
+                  </div>
+                </section>
               </div>
 
               <label class="field-label" for="promptInput">Describe the change</label>
@@ -104,6 +118,21 @@
           </div>
         </section>
       </main>
+
+      <section class="video-tools" aria-labelledby="video-tools-title">
+        <p class="eyebrow">ON-DEVICE TOOL</p>
+        <h2 id="video-tools-title">Basic video trimming</h2>
+        <p>Where this browser supports local recording, trim a clip and export it as WebM without uploading it. Original video files are never changed.</p>
+        <label class="field-label" for="videoFile">Choose a video<input id="videoFile" type="file" accept="video/*"></label>
+        <video id="videoPreview" controls playsinline preload="metadata" hidden></video>
+        <div class="video-trim-controls">
+          <label>Start time in seconds<input id="videoTrimStart" type="number" min="0" step="0.1" value="0" disabled></label>
+          <label>End time in seconds<input id="videoTrimEnd" type="number" min="0" step="0.1" disabled></label>
+        </div>
+        <button type="button" class="primary-button" id="trimVideo" disabled>Trim and export offline</button>
+        <a class="secondary-button" id="downloadVideo" hidden>Download trimmed video</a>
+        <p class="studio-status" id="videoStatus" role="status" aria-live="polite">Checking local video support…</p>
+      </section>
 
       <footer>MINA TEACH AI · Dhaloota beekumsa omishuudha.</footer>
     </div>
