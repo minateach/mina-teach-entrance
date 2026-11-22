@@ -30,9 +30,9 @@ try {
   await evaluate('document.querySelector(".lesson-page button").textContent.includes("Save lesson") && [...document.querySelectorAll(".lesson-page button")].find(button=>button.textContent.includes("Download for offline"))?.click()');
   await waitFor('document.querySelector(".lesson-page").innerText.includes("Available offline")');
   assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true,"lesson view fits Android width");
-  await navigate("/learning/?grade=10&subject=History&language=en",
-    'document.querySelector(".course-card button[aria-label=\\"Download Grade 10 History offline\\"]")');
-  await evaluate('document.querySelector(".course-card button[aria-label=\\"Download Grade 10 History offline\\"]').click()');
+  await navigate("/learning/?grade=10&language=en",
+    '[...document.querySelectorAll(".course-card button")].some(button=>button.getAttribute("aria-label")==="Download Grade 10 History offline")');
+  await evaluate('[...document.querySelectorAll(".course-card button")].find(button=>button.getAttribute("aria-label")==="Download Grade 10 History offline").click()');
   await waitFor('document.getElementById("offline-bulk-status").textContent.includes("lessons saved offline")');
   assert.equal(await evaluate('document.getElementById("offline-storage-usage").textContent.includes("40 MB")'),true,"device storage usage and capacity are displayed");
   await evaluate('const t=document.getElementById("offline-mode-toggle");t.checked=true;t.dispatchEvent(new Event("change",{bubbles:true}))');

@@ -132,6 +132,7 @@ async function selectFile(file) {
     clearResult();
     localRotation = 0;
     localGrayscale = false;
+    elements.grayscaleLocalImage.textContent = "Grayscale";
     elements.localBrightness.value = "100";
     elements.localContrast.value = "100";
     for (const button of [elements.rotateLocalImage, elements.grayscaleLocalImage, elements.applyLocalImageEdits, elements.resetLocalImageEdits]) button.disabled = false;
@@ -201,6 +202,7 @@ function resetStudio() {
   elements.promptInput.value = "";
   localRotation = 0;
   localGrayscale = false;
+  elements.grayscaleLocalImage.textContent = "Grayscale";
   elements.localBrightness.value = "100";
   elements.localContrast.value = "100";
   for (const button of [elements.rotateLocalImage, elements.grayscaleLocalImage, elements.applyLocalImageEdits, elements.resetLocalImageEdits]) button.disabled = true;
@@ -218,14 +220,16 @@ function setVideoStatus(message, state = "ready") {
 function supportsVideoTrim() {
   return Boolean(
     HTMLMediaElement.prototype.captureStream || HTMLMediaElement.prototype.mozCaptureStream
-  ) && typeof MediaRecorder === "function";
+  ) && typeof MediaRecorder === "function" &&
+    ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"]
+      .some(type => MediaRecorder.isTypeSupported(type));
 }
 
 function updateVideoTrimButton() {
   const start = Number(elements.videoTrimStart.value);
   const end = Number(elements.videoTrimEnd.value);
   elements.trimVideo.disabled = videoIsProcessing || !elements.videoPreview.src || !Number.isFinite(start) ||
-    !Number.isFinite(end) || start < 0 || end <= start || end > elements.videoPreview.duration ||
+    !Number.isFinite(end) || start < 0 || end <= start || end - start > 120 || end > elements.videoPreview.duration ||
     !supportsVideoTrim();
 }
 
@@ -241,6 +245,8 @@ async function trimVideoOffline() {
     return;
   }
   videoIsProcessing = true;
+  let stream;
+  let stopAtEnd;
   updateVideoTrimButton();
   setVideoStatus("Trimming locally. Keep this page open until export finishes…");
   try {
@@ -252,7 +258,7 @@ async function trimVideoOffline() {
       video.currentTime = start;
       await seeked;
     }
-    const stream = (video.captureStream || video.mozCaptureStream).call(video);
+    stream = (video.captureStream || video.mozCaptureStream).call(video);
     const preferred = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"]
       .find(type => MediaRecorder.isTypeSupported(type));
     if (!preferred) throw new Error("This browser has no supported local WebM recording format.");
@@ -263,7 +269,7 @@ async function trimVideoOffline() {
       recorder.onerror = () => reject(new Error("The browser could not finish recording this local video."));
       recorder.onstop = () => resolve(new Blob(chunks, { type: recorder.mimeType || "video/webm" }));
     });
-    const stopAtEnd = () => {
+    stopAtEnd = () => {
       if (video.currentTime >= end && recorder.state === "recording") {
         video.pause();
         recorder.stop();
@@ -278,7 +284,6 @@ async function trimVideoOffline() {
     const blob = await finished;
     clearTimeout(safetyTimer);
     video.removeEventListener("timeupdate", stopAtEnd);
-    for (const track of stream.getTracks()) track.stop();
     if (!blob.size) throw new Error("The selected clip produced no video data.");
     clearUrl(videoResultUrl);
     videoResultUrl = URL.createObjectURL(blob);
@@ -289,6 +294,8 @@ async function trimVideoOffline() {
   } catch (error) {
     setVideoStatus(error.message || "The video could not be trimmed locally.", "error");
   } finally {
+    if (stopAtEnd) video.removeEventListener("timeupdate", stopAtEnd);
+    if (stream) for (const track of stream.getTracks()) track.stop();
     videoIsProcessing = false;
     updateVideoTrimButton();
   }
@@ -413,8 +420,8 @@ elements.videoFile.addEventListener("change", () => {
   clearUrl(videoSourceUrl); clearUrl(videoResultUrl); videoResultUrl = "";
   elements.downloadVideo.hidden = true;
   if (!file) { elements.videoPreview.removeAttribute("src"); updateVideoTrimButton(); return; }
-  if (!file.type.startsWith("video/") || file.size > 200 * 1024 * 1024) {
-    setVideoStatus("Choose a video file smaller than 200 MB.", "error");
+  if (!file.type.startsWith("video/") || file.size > 100 * 1024 * 1024) {
+    setVideoStatus("Choose a video file smaller than 100 MB.", "error");
     elements.videoFile.value = ""; return;
   }
   videoSourceUrl = URL.createObjectURL(file);
@@ -424,10 +431,7 @@ elements.videoFile.addEventListener("change", () => {
     elements.videoTrimStart.value = "0";
     elements.videoTrimEnd.value = String(Math.floor(elements.videoPreview.duration * 10) / 10);
     elements.videoTrimStart.disabled = false; elements.videoTrimEnd.disabled = false;
-    if (elements.videoPreview.duration > 600) {
-      setVideoStatus("Clips longer than 10 minutes are not supported by this offline tool.", "error");
-      elements.videoTrimEnd.value = "600";
-    } else if (supportsVideoTrim()) {
+    if (supportsVideoTrim()) {
       setVideoStatus("Video loaded on this device. Select a clip range to trim offline.");
     } else {
       setVideoStatus("This browser does not support offline video trimming. Your video was not uploaded.", "error");

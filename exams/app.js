@@ -453,6 +453,7 @@
   }
   $("download-offline").addEventListener("click",downloadQuestionSet);
   window.addEventListener("mina:offline-change",renderOfflineDownloads);
+  window.addEventListener("mina:offline-mode-change",()=>updateCount());
   window.addEventListener("online",()=>initializeAccount());
   renderOfflineDownloads();
 })();

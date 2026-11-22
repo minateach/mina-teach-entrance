@@ -316,6 +316,9 @@ window.addEventListener("popstate",()=>loadPage());
 await store.initialize();
 window.addEventListener("online",()=>store.retry());
 window.addEventListener("mina:offline-change",renderOfflineDownloads);
+window.addEventListener("mina:offline-mode-change",event=>{
+  if(!event.detail?.enabled)void store.retry();
+});
 await loadPage();
 if(store.signedIn) {
   try { examHistory=(await api("/api/exams/history")).attempts; }

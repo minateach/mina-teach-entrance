@@ -89,6 +89,7 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
 .video-tools input[type="file"], .video-trim-controls input { display: block; width: 100%; margin-top: 6px; padding: 9px; border: 1px solid #d4dfec; border-radius: 9px; background: #fff; }
 .video-tools video { display: block; width: min(100%, 740px); max-height: 420px; margin: 14px 0; border-radius: 12px; background: #10234b; }
 .video-tools .secondary-button { display: inline-block; margin: 10px 0 0; text-decoration: none; }
+.video-tools [hidden] { display: none; }
 .studio-status { min-height: 38px; margin: 10px 0 0; padding: 9px 11px; border: 1px solid #e0e8f2; border-radius: 10px; color: #47617f; background: #f7faff; font-size: 11px; line-height: 1.45; }
 .studio-status[data-state="error"] { border-color: #f1d0c8; color: #8a3c34; background: #fff6f3; }
 .studio-status[data-state="success"] { border-color: #c8e6d6; color: #236b4e; background: #f2fbf6; }

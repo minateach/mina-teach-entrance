@@ -116,13 +116,13 @@ try {
   await waitFor('!document.getElementById("sourcePreview").hidden');
   await command("Network.emulateNetworkConditions", {offline:true,latency:0,downloadThroughput:0,uploadThroughput:0});
   await waitFor("navigator.onLine===false");
-  await evaluate("const t=document.getElementById('offline-mode-toggle');t.checked=true;t.dispatchEvent(new Event('change',{bubbles:true}));document.getElementById('rotateLocalImage').click();document.getElementById('grayscaleLocalImage').click();document.getElementById('applyLocalImageEdits').click()");
+  await evaluate("document.getElementById('offline-mode-toggle').checked=true;document.getElementById('offline-mode-toggle').dispatchEvent(new Event('change',{bubbles:true}));document.getElementById('rotateLocalImage').click();document.getElementById('grayscaleLocalImage').click();document.getElementById('applyLocalImageEdits').click()");
   await waitFor('document.getElementById("studioStatus").textContent.includes("Offline photo edit is ready")');
   assert.match(await evaluate("document.getElementById('previewState').textContent"),/Edited on this device/);
   assert.equal(studioPayloads.length,0,"basic image edit does not call the AI service while offline");
   await command("Network.emulateNetworkConditions", {offline:false,latency:0,downloadThroughput:10_000_000,uploadThroughput:10_000_000});
   await waitFor("navigator.onLine===true");
-  await evaluate("const t=document.getElementById('offline-mode-toggle');t.checked=false;t.dispatchEvent(new Event('change',{bubbles:true}))");
+  await evaluate("document.getElementById('offline-mode-toggle').checked=false;document.getElementById('offline-mode-toggle').dispatchEvent(new Event('change',{bubbles:true}))");
   await evaluate("document.getElementById('promptInput').value='Improve the lighting while preserving the subject';document.getElementById('promptInput').dispatchEvent(new Event('input'));document.getElementById('runButton').click()");
   await waitFor('!document.getElementById("resultPreview").hidden');
   assert.equal(studioPayloads[0].mode, "edit");
@@ -139,7 +139,9 @@ try {
   if(videoSupported){
     const generated=await evaluate(`(async()=>{const canvas=document.createElement('canvas');canvas.width=160;canvas.height=90;const ctx=canvas.getContext('2d'),stream=canvas.captureStream(8),recorder=new MediaRecorder(stream,{mimeType:'video/webm'}),chunks=[];recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};const stopped=new Promise(resolve=>recorder.onstop=()=>resolve(new Blob(chunks,{type:recorder.mimeType})));recorder.start(100);let frame=0;const draw=setInterval(()=>{ctx.fillStyle=frame++%2?'#2563eb':'#ef4444';ctx.fillRect(0,0,160,90)},100);await new Promise(resolve=>setTimeout(resolve,1600));clearInterval(draw);recorder.stop();const blob=await stopped;for(const track of stream.getTracks())track.stop();const transfer=new DataTransfer();transfer.items.add(new File([blob],'sample.webm',{type:'video/webm'}));const input=document.getElementById('videoFile');input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));return {bytes:blob.size,type:blob.type}})()`);
     assert.ok(generated.bytes>0,"test video was created locally in the browser");
-    await waitFor('Number.isFinite(document.getElementById("videoPreview").duration) && document.getElementById("videoPreview").duration>0');
+    await waitFor('(Number.isFinite(document.getElementById("videoPreview").duration) && document.getElementById("videoPreview").duration>0) || document.getElementById("videoStatus").dataset.state==="error"');
+    const videoMetadata=await evaluate("JSON.stringify({duration:document.getElementById('videoPreview').duration,error:document.getElementById('videoPreview').error?.message,status:document.getElementById('videoStatus').textContent,source:document.getElementById('videoPreview').currentSrc.slice(0,40)})");
+    assert.ok(await evaluate('Number.isFinite(document.getElementById("videoPreview").duration) && document.getElementById("videoPreview").duration>0'),`generated test video could not load: ${videoMetadata}`);
     await evaluate("document.getElementById('videoTrimEnd').value='0.5';document.getElementById('videoTrimEnd').dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('trimVideo').click()");
     await waitFor('!document.getElementById("downloadVideo").hidden');
     assert.match(await evaluate("document.getElementById('videoStatus').textContent"),/Trim complete/,"offline video clip is exported in the browser");
