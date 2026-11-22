@@ -6,7 +6,7 @@
 - Approved Android package ID: `com.minateach.minateachai`
 - Version prepared: `1.0.0` (version code `1`)
 - Website: https://mina-teach-entrance.replit.app
-- Privacy policy: https://mina-teach-entrance.replit.app/privacy/
+- Privacy policy target URL: https://mina-teach-entrance.replit.app/privacy/ (the page currently exists in the workspace preview; publish the web change and verify the production URL before submitting)
 - Public privacy contact: minaseyfufa@gmail.com
 - Slogan: Dhaloota beekumsa omishuudha.
 
@@ -32,8 +32,9 @@ The AI Assistant, current web research, and AI image features require internet a
 
 - App icon source: the existing MINA TEACH AI 512px app icon.
 - Splash: generated from the same-repository TWA configuration, with the exact slogan.
-- Phone screenshots: `play-store/screenshots/` (capture from the running app; confirm they match the final published build before submission).
-- Feature graphic: not prepared. Create and review a 1024×500 Play Console asset before submission.
+- Phone screenshots: `play-store/screenshots/home.jpg` and `play-store/screenshots/learning-history.jpg`; they are current QA captures and must be refreshed from the final candidate build.
+- Feature graphic: `play-store/feature-graphic.png` (1024×500); review it in Play Console before submission.
+- An AI Assistant screenshot is intentionally omitted: the live preview displayed a MiniMax connection warning. Reconnect and test a real answer before capturing that feature for the listing.
 
 ## Owner review
 

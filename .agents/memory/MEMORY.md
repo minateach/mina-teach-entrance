@@ -2,3 +2,4 @@
 - [Curriculum authorship permission](curriculum-authorship.md) — author original lessons and questions from correct textbook references; do not wait for prepared lesson prose.
 - [Post-merge readiness](post-merge-readiness.md) — successful setup does not prove the running preview has loaded merged server changes; verify the live app.
 - [Learning content integrity](learning-content-integrity.md) — preserve every available material; delivery audits do not prove full textbook coverage, and completion follows accessed content.
+- [Android wrapper and sign-in](android-twa.md) — use a Trusted Web Activity for Android so Clerk sign-in stays in Chrome; verified fullscreen requires the Play signing fingerprint.

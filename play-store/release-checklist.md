@@ -18,9 +18,19 @@
 
 ## Before Play Console submission
 
-- Complete and owner-approve the privacy policy at `/privacy/`.
+- Complete and owner-approve the privacy policy at `/privacy/`, deploy the web change, and verify the production privacy URL returns this page before submission.
 - Implement and test full account and associated-data deletion; current saved-record deletion does not remove the Clerk account, exam attempts, or bookmarks.
 - Verify Play Console's current target API requirement, app signing, content rating, target audience, Data safety, store listing, and required testing track.
 - Capture final phone screenshots from the exact candidate build; add a reviewed 1024×500 feature graphic.
 - Confirm all required production database schema is present after publishing, and test signed-in data flows without temporary auth bypasses.
 - Submit through the owner's Play Console. This repository work does not submit the app or represent Google approval.
+
+## Current verification status
+
+- `npm test`: passed (54 tests).
+- Android-emulated Chrome touch test: passed for the app shell and one Grade 10 History lesson, including practice answer feedback, save/complete state, and Previous/Next navigation.
+- Offline browser test: passed for cached lessons, local practice, saved results/bookmarks, and mobile layout.
+- Full all-subject Android-emulated navigation sweep: not completed; it timed out after its Grade 9 pass. Do not report all-grade Android navigation as verified.
+- Native Android/Gradle build: not run because this workspace has no Java/JDK or Android SDK/ADB.
+- Physical Android device, signed TWA, Play Console, and authenticated student account: not tested.
+- Live preview showed a MiniMax connection warning; the AI Assistant screenshot is omitted until a real answer is verified.

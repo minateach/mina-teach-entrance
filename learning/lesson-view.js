@@ -73,7 +73,7 @@ export function renderLesson({root,lesson,course,store,changed}) {
   complete.id="complete-lesson";
   // This view is only built after successful detail loading; titles/failed requests cannot be completed.
   complete.disabled=typeof lesson.content!=="string" || lesson.content.trim().length<80;
-  const practiceStatus=node("p",undefined,"muted");practiceStatus.setAttribute("role","status");
+  const practiceStatus=node("p",undefined,"muted");practiceStatus.id="practice-status";practiceStatus.setAttribute("role","status");
   const offlineStatus=node("p",undefined,"muted");offlineStatus.setAttribute("role","status");
   const downloadKey=`lesson:${lesson.grade}:${lesson.language}:${lesson.id}`;
   const download=makeButton("Download for offline",async()=>{

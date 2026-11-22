@@ -19,6 +19,22 @@ test("Android TWA uses the owner-approved identity and existing production origi
   assert.equal(config.features.locationDelegation, undefined);
 });
 
+test("generated Android wrapper keeps permissions limited and branding/version aligned", async () => {
+  const [manifest, gradle, instructions] = await Promise.all([
+    read("android/app/src/main/AndroidManifest.xml"),
+    read("android/app/build.gradle"),
+    read("play-store/release-checklist.md"),
+  ]);
+  assert.match(manifest, /android:allowBackup="false"/);
+  assert.doesNotMatch(manifest, /uses-permission[^>]+(?:CAMERA|RECORD_AUDIO|ACCESS_FINE_LOCATION|POST_NOTIFICATIONS)/);
+  assert.match(gradle, /applicationId "com\.minateach\.minateachai"/);
+  assert.match(gradle, /versionName "1\.0\.0"/);
+  assert.match(gradle, /targetSdkVersion 36/);
+  assert.match(instructions, /upload keystore/);
+  assert.match(gradle, /name: 'MINA TEACH AI'/);
+  assert.match(await read("scripts/prepare-android.mjs"), /Dhaloota beekumsa omishuudha\./);
+});
+
 test("store preparation discloses the exact slogan and current account deletion limits", async () => {
   const [privacy, listing, safety, checklist] = await Promise.all([
     read("privacy/index.html"),

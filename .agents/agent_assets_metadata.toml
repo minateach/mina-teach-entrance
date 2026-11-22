@@ -28,3 +28,17 @@ mtime_ms = 1795351768781
 storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:d21f7a53-07e2-413b-b668-fe31619cf46b/c704e05b-f962-46ac-8d43-1e4e49f15f5f/c58c1130-cef4-484a-8d1e-c488af804e23"
 storage_version_token = "1795351822261013"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "oDeYfNNruHuFoGAZx4age"
+uri = "file://play-store/feature-graphic.png"
+type = "image"
+title = "MINA TEACH AI Play feature graphic"
+description = "1024×500 Google Play listing draft using the approved name and slogan."
+logical_id = "7124a4fb-c894-46b7-9c98-733eb00cc869"
+content_hash = "sha256:2c4b0aed7396769c84d90f87512941431d368b2df0deb69133132b6a5f6717c6"
+size = 68797
+mtime_ms = 1795354007173
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:d21f7a53-07e2-413b-b668-fe31619cf46b/7124a4fb-c894-46b7-9c98-733eb00cc869/8a4662c6-1a6f-449d-bd4c-2b533506f34d"
+storage_version_token = "1795355949734712"
+content_type = "image/png"
