@@ -87,7 +87,8 @@ export async function requestMiniMaxChat(connectors, messages, model = defaultMi
 
 export function shouldUseGeminiForRequest(message, hasImage = false) {
   if (hasImage) return true;
-  return /\b(search|browse|web|internet|latest|current|today|recent|news|weather|price|exchange rate|live|right now|this week|this month|202[6-9])\b/i.test(message)
+  return /\b(search|browse|web|internet|latest|today|recent|news|weather|price|exchange rate|live|right now|this week|this month|this year|202[6-9])\b/i.test(message)
+    || /\bcurrent\s+(information|events?|price|rate|policy|president|prime minister|version|weather|guidance|news)\b/i.test(message)
     || /ዛሬ|አሁን|የቅርብ|ወቅታዊ|ዜና|ዋጋ|መጠን|ሰሞኑን/u.test(message)
     || /\b(ammee|har'a|amma|haaraa|odeeffannoo yeroo ammaa|gatii|guyyaa kana)\b/i.test(message);
 }

@@ -48,6 +48,24 @@
             </svg>
             New conversation
           </button>
+          <button class="memory-toggle" id="memoryToggle" type="button" aria-expanded="false" aria-controls="memoryPanel">
+            My study memory
+          </button>
+          <section class="memory-panel" id="memoryPanel" aria-label="Student-controlled study memory" hidden>
+            <h2>My study memory</h2>
+            <p class="memory-description">Only notes you add are saved. Choose whether Mina may use them in answers. Avoid passwords or sensitive details.</p>
+            <label class="memory-consent">
+              <input id="memoryEnabled" type="checkbox">
+              <span>Use my saved notes in answers</span>
+            </label>
+            <form class="memory-add-form" id="memoryAddForm">
+              <label class="sr-only" for="memoryInput">Add a study preference</label>
+              <input id="memoryInput" type="text" maxlength="240" placeholder="Example: Show each algebra step">
+              <button type="submit" id="memoryAddButton">Add</button>
+            </form>
+            <p class="memory-status" id="memoryStatus" role="status">No notes saved.</p>
+            <ul class="memory-list" id="memoryList" aria-label="Saved study notes"></ul>
+          </section>
           <h2 class="history-heading">Recent sessions</h2>
           <nav class="history-list" id="historyList" aria-label="Saved conversations"></nav>
           <div class="sidebar-note">
@@ -65,8 +83,8 @@
                 </svg>
               </button>
               <div>
-                <h1 class="main-title">AI study tutor</h1>
-                <p class="main-subtitle">Patient help for the questions you are working through</p>
+                <h1 class="main-title">AI Assistant</h1>
+                <p class="main-subtitle">Study support, general questions, and follow-up conversations</p>
               </div>
             </div>
             <div class="status-pill" id="statusPill" data-state="checking" role="status" aria-live="polite">
@@ -117,7 +135,7 @@
                 </button>
                 <input class="sr-only" id="galleryInput" type="file" accept="image/jpeg,image/png,image/webp">
                 <input class="sr-only" id="cameraInput" type="file" accept="image/jpeg,image/png,image/webp" capture="environment">
-                <textarea id="messageInput" name="message" rows="1" placeholder="Ask a question or share what feels difficult…" autocomplete="off"></textarea>
+                <textarea id="messageInput" name="message" rows="1" placeholder="Ask a study or general question…" autocomplete="off"></textarea>
                 <button class="send-button" id="sendButton" type="submit" aria-label="Send message" disabled>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
                     <path d="M5 12h13M13 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round"/>
@@ -131,7 +149,7 @@
               </div>
               <div class="composer-help">
                 <span>Enter to send · Shift + Enter for a new line</span>
-                <span>Current web sources are checked when useful; grounded requests are capped at 100 per app month and may incur Google API charges.</span>
+                <span>General chat uses MiniMax. Current web research and image analysis use Gemini when available; web search is capped at 100 app requests per month and may incur Google API charges.</span>
               </div>
               <p class="image-retention-note">Images stay in this browser and are sent to Gemini only when you submit them. Gemini vision is capped at 20 app requests per UTC month and is billed by input tokens. Synced chats on another device need the image re-uploaded.</p>
             </div>

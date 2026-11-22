@@ -2,6 +2,7 @@ import { getLocalImage, saveLocalImage } from "./image-store.js";
 import { hasOfflineTutor, generateOfflineTutorAnswer } from "./offline-ai-provider.js";
 
 const STORAGE_KEY = "mina-teach.assistant.conversations.v1";
+const MEMORY_STORAGE_KEY = "mina-teach.assistant.memory.v1";
 let storageAvailable = true;
 
 const elements = {
@@ -28,21 +29,42 @@ const elements = {
   mobileMenuButton: document.getElementById("mobileMenuButton"),
   sidebarScrim: document.getElementById("sidebarScrim"),
   quickPrompts: [...document.querySelectorAll("[data-prompt]")],
+  memoryToggle: document.getElementById("memoryToggle"),
+  memoryPanel: document.getElementById("memoryPanel"),
+  memoryEnabled: document.getElementById("memoryEnabled"),
+  memoryAddForm: document.getElementById("memoryAddForm"),
+  memoryInput: document.getElementById("memoryInput"),
+  memoryAddButton: document.getElementById("memoryAddButton"),
+  memoryStatus: document.getElementById("memoryStatus"),
+  memoryList: document.getElementById("memoryList"),
+  storageNote: document.getElementById("storageNote"),
 };
 
-let conversations = readConversations();
+let conversations = [];
 let activeConversationId = null;
 let isLoading = false;
 let retryMessage = "";
 let retryError = "";
 let providerConfigured = null;
+let geminiConfigured = false;
 let accountSyncEnabled = false;
+let accountOwner = "guest";
+let accountPreferences = {};
+let studentMemory = [];
+let memoryEnabled = false;
+let memoryEditingId = null;
+let syncingAccount = false;
+let accountDataReady = false;
 let selectedImage = null;
 const messageImageUrls = new Set();
 
-function readConversations() {
+function accountStorageKey(baseKey, owner = accountOwner) {
+  return owner === "guest" ? baseKey : `${baseKey}:${owner}`;
+}
+
+function readConversations(key = accountStorageKey(STORAGE_KEY)) {
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+    const saved = JSON.parse(localStorage.getItem(key) || "[]");
     if (!Array.isArray(saved)) return [];
     return saved.filter((item) =>
       item &&
@@ -58,9 +80,75 @@ function readConversations() {
   }
 }
 
+function normalizeMemoryEntries(entries) {
+  if (!Array.isArray(entries)) return [];
+  return entries.slice(0, 20).flatMap((entry) => {
+    if (!entry || typeof entry !== "object" || typeof entry.id !== "string" || typeof entry.text !== "string") return [];
+    const text = entry.text.trim().replace(/\s+/g, " ").slice(0, 240);
+    if (!text) return [];
+    return [{
+      id: entry.id.slice(0, 100),
+      text,
+      updatedAt: typeof entry.updatedAt === "string" ? entry.updatedAt : new Date().toISOString(),
+    }];
+  });
+}
+
+function readLocalMemory(owner = accountOwner) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(accountStorageKey(MEMORY_STORAGE_KEY, owner)) || "null");
+    if (!saved || typeof saved !== "object") return null;
+    return {
+      entries: normalizeMemoryEntries(saved.entries),
+      enabled: saved.enabled === true,
+    };
+  } catch {
+    storageAvailable = false;
+    return null;
+  }
+}
+
+function persistLocalMemory() {
+  try {
+    localStorage.setItem(accountStorageKey(MEMORY_STORAGE_KEY), JSON.stringify({
+      entries: studentMemory,
+      enabled: memoryEnabled,
+    }));
+    storageAvailable = true;
+  } catch {
+    storageAvailable = false;
+  }
+  renderMemoryList();
+  renderStorageNote();
+}
+
+async function persistAccountPreferences() {
+  persistLocalMemory();
+  if (!accountSyncEnabled || accountOwner === "guest") return;
+  try {
+    const response = await fetch("/api/account/data/preferences", {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        expectedUserId: accountOwner,
+        data: {
+          ...accountPreferences,
+          assistantMemory: studentMemory,
+          assistantMemoryEnabled: memoryEnabled,
+        },
+      }),
+    });
+    if (!response.ok) throw new Error("Account sync failed");
+    elements.memoryStatus.textContent = memoryStatusText("Saved to your account.");
+  } catch {
+    elements.memoryStatus.textContent = memoryStatusText("Saved on this device; account sync needs a retry.");
+  }
+}
+
 function persistConversations() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
+    localStorage.setItem(accountStorageKey(STORAGE_KEY), JSON.stringify(conversations));
     storageAvailable = true;
   } catch {
     storageAvailable = false;
@@ -68,34 +156,207 @@ function persistConversations() {
   renderHistory();
   renderStorageNote();
   if (accountSyncEnabled) {
-    fetch("/api/account/data/conversations", {
+    void fetch("/api/account/data/conversations", {
       method: "PUT",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ data: conversations }),
-    }).catch(() => {});
+      body: JSON.stringify({ expectedUserId: accountOwner, data: conversations }),
+    }).then((response) => {
+      if (!response.ok) throw new Error("Account sync failed");
+    }).catch(() => {
+      accountSyncEnabled = false;
+      elements.storageNote.textContent = "Sessions remain on this device; account sync needs a retry.";
+    });
   }
 }
 
 async function syncAccountConversations() {
+  if (syncingAccount) return;
+  syncingAccount = true;
   try {
     const authResponse = await fetch("/api/account/status", { credentials: "same-origin" });
-    if (!authResponse.ok) return;
+    if (!authResponse.ok) throw new Error("Account status unavailable");
     const auth = await authResponse.json();
-    if (!auth.signedIn) return;
-    const response = await fetch("/api/account/data", { credentials: "same-origin" });
-    if (!response.ok) return;
-    const { records } = await response.json();
-    accountSyncEnabled = true;
-    const merged = new Map((records?.conversations || []).map(item => [item.id, item]));
-    conversations.forEach(item => merged.set(item.id, item));
+    const nextOwner = auth.signedIn && typeof auth.userId === "string" && auth.userId
+      ? auth.userId
+      : "guest";
+    const ownerChanged = nextOwner !== accountOwner;
+    if (ownerChanged) {
+      accountOwner = nextOwner;
+      activeConversationId = null;
+      conversations = readConversations(accountStorageKey(STORAGE_KEY, accountOwner));
+      studentMemory = [];
+      memoryEnabled = false;
+      accountPreferences = {};
+    }
+
+    let records = {};
+    accountSyncEnabled = false;
+    if (accountOwner !== "guest") {
+      const response = await fetch("/api/account/data", { credentials: "same-origin" });
+      if (response.ok) {
+        const accountData = await response.json();
+        records = accountData?.records && typeof accountData.records === "object" ? accountData.records : {};
+        accountSyncEnabled = true;
+      }
+    }
+    const localConversations = readConversations(accountStorageKey(STORAGE_KEY, accountOwner));
+    const merged = new Map((records?.conversations || []).filter(item => item && typeof item.id === "string").map(item => [item.id, item]));
+    localConversations.forEach(item => merged.set(item.id, item));
     conversations = [...merged.values()].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
-    persistConversations();
-    if (elements.storageNote) elements.storageNote.textContent = "Sessions sync to your account and stay on this device.";
+    const localMemory = readLocalMemory(accountOwner);
+    accountPreferences = records?.preferences && typeof records.preferences === "object" && !Array.isArray(records.preferences)
+      ? records.preferences
+      : {};
+    const remoteMemory = {
+      entries: normalizeMemoryEntries(accountPreferences.assistantMemory),
+      enabled: accountPreferences.assistantMemoryEnabled === true,
+    };
+    const chosenMemory = localMemory || remoteMemory;
+    studentMemory = chosenMemory.entries;
+    memoryEnabled = chosenMemory.enabled;
+    persistLocalMemory();
+    if (accountSyncEnabled) {
+      localStorage.setItem(accountStorageKey(STORAGE_KEY), JSON.stringify(conversations));
+      if (!localMemory && (remoteMemory.entries.length || remoteMemory.enabled)) persistLocalMemory();
+      void persistAccountPreferencesIfNeeded(localMemory);
+    }
+    if (!conversations.some(item => item.id === activeConversationId)) {
+      activeConversationId = conversations[0]?.id || null;
+    }
+    if (activeConversationId) {
+      const active = getActiveConversation();
+      elements.gradeSelect.value = String(active.grade);
+      elements.languageSelect.value = active.language;
+    }
+    renderHistory();
+    renderMemoryList();
+    renderStorageNote();
+    renderConversation();
+    if (elements.storageNote && accountOwner !== "guest") {
+      elements.storageNote.textContent = accountSyncEnabled
+        ? "Sessions sync to your account and stay on this device."
+        : "Sessions are private to this account on this device; account sync is unavailable.";
+    }
   } catch {
     accountSyncEnabled = false;
+    if (!conversations.length && accountOwner === "guest") conversations = readConversations(STORAGE_KEY);
+    if (accountOwner === "guest") {
+      const localMemory = readLocalMemory("guest");
+      if (localMemory) {
+        studentMemory = localMemory.entries;
+        memoryEnabled = localMemory.enabled;
+      }
+    }
+    if (!activeConversationId && conversations.length) activeConversationId = conversations[0].id;
+    renderHistory();
+    renderMemoryList();
+    renderStorageNote();
+    renderConversation();
+  } finally {
+    syncingAccount = false;
+    accountDataReady = true;
+    renderMemoryList();
   }
+}
+
+async function persistAccountPreferencesIfNeeded(localMemory) {
+  if (localMemory) return;
+  if (!studentMemory.length && !memoryEnabled) return;
+  await persistAccountPreferences();
+}
+
+function memoryStatusText(prefix = "") {
+  const countText = studentMemory.length
+    ? `${studentMemory.length} saved ${studentMemory.length === 1 ? "note" : "notes"}`
+    : "No notes saved";
+  const location = accountOwner === "guest" ? "on this device" : accountSyncEnabled ? "on this device and your account" : "on this device";
+  return [prefix, `${countText} ${location}.`].filter(Boolean).join(" ");
+}
+
+function renderMemoryList() {
+  if (!elements.memoryList) return;
+  elements.memoryEnabled.checked = memoryEnabled;
+  elements.memoryEnabled.disabled = !accountDataReady;
+  elements.memoryInput.disabled = !accountDataReady;
+  elements.memoryAddButton.disabled = !accountDataReady;
+  elements.memoryToggle.disabled = !accountDataReady;
+  elements.memoryList.replaceChildren();
+  for (const entry of studentMemory) {
+    const item = document.createElement("li");
+    item.className = "memory-item";
+    if (memoryEditingId === entry.id) {
+      const form = document.createElement("form");
+      form.className = "memory-edit-form";
+      const input = document.createElement("input");
+      input.type = "text";
+      input.maxLength = 240;
+      input.value = entry.text;
+      input.setAttribute("aria-label", "Edit saved study note");
+      const save = document.createElement("button");
+      save.type = "submit";
+      save.textContent = "Save";
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", () => {
+        memoryEditingId = null;
+        renderMemoryList();
+      });
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const text = input.value.trim().replace(/\s+/g, " ").slice(0, 240);
+        if (!text) return;
+        studentMemory = studentMemory.map(item => item.id === entry.id
+          ? { ...item, text, updatedAt: new Date().toISOString() }
+          : item);
+        memoryEditingId = null;
+        void persistAccountPreferences();
+      });
+      form.append(input, save, cancel);
+      item.append(form);
+    } else {
+      const text = document.createElement("span");
+      text.className = "memory-item-text";
+      text.textContent = entry.text;
+      const actions = document.createElement("span");
+      actions.className = "memory-item-actions";
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.textContent = "Edit";
+      edit.setAttribute("aria-label", `Edit saved note: ${entry.text}`);
+      edit.addEventListener("click", () => {
+        memoryEditingId = entry.id;
+        renderMemoryList();
+        elements.memoryList.querySelector("input")?.focus();
+      });
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "Remove";
+      remove.setAttribute("aria-label", `Remove saved note: ${entry.text}`);
+      remove.addEventListener("click", () => {
+        studentMemory = studentMemory.filter(item => item.id !== entry.id);
+        if (memoryEditingId === entry.id) memoryEditingId = null;
+        void persistAccountPreferences();
+      });
+      actions.append(edit, remove);
+      item.append(text, actions);
+    }
+    elements.memoryList.append(item);
+  }
+  elements.memoryStatus.textContent = memoryStatusText();
+}
+
+function addMemoryNote(text) {
+  const cleaned = String(text || "").trim().replace(/\s+/g, " ").slice(0, 240);
+  if (!cleaned) return;
+  if (studentMemory.length >= 20) {
+    elements.memoryStatus.textContent = "You can save up to 20 notes. Remove one before adding another.";
+    return;
+  }
+  studentMemory.push({ id: makeId(), text: cleaned, updatedAt: new Date().toISOString() });
+  elements.memoryInput.value = "";
+  void persistAccountPreferences();
 }
 
 function makeId() {
@@ -197,7 +458,11 @@ function formatDate(value) {
 function renderStorageNote() {
   const note = document.getElementById("storageNote");
   note.textContent = storageAvailable
-    ? "Sessions are saved only in this browser."
+    ? accountOwner === "guest"
+      ? "Sessions are saved on this device only."
+      : accountSyncEnabled
+        ? "Sessions sync to your account and stay on this device."
+        : "Sessions are saved privately on this device."
     : "Browser storage is unavailable; sessions may not be saved.";
   note.setAttribute("role", storageAvailable ? "note" : "alert");
 }
@@ -310,6 +575,12 @@ function createMessageNode(message) {
   content.textContent = message.content;
 
   contentWrap.append(author);
+  if (message.role === "assistant" && ["minimax", "gemini"].includes(message.provider)) {
+    const provider = document.createElement("span");
+    provider.className = "provider-badge";
+    provider.textContent = message.providerNotice ? "Gemini fallback" : message.provider === "minimax" ? "MiniMax" : "Gemini";
+    contentWrap.append(provider);
+  }
   if (message.role === "assistant" && message.offlineAI === true) {
     const localBadge = document.createElement("span");
     localBadge.className = "offline-ai-badge";
@@ -592,13 +863,27 @@ async function checkAssistantStatus() {
       : result.code === "SETUP_REQUIRED"
         ? false
         : null;
-    if (providerConfigured) {
+    const miniMaxReady = result.minimaxConfigured === true;
+    const geminiReady = result.geminiConfigured === true || result.provider === "gemini" && result.configured === true;
+    geminiConfigured = geminiReady;
+    if (miniMaxReady) {
+      setStatus("ready", "MiniMax connected");
+    } else if (result.provider === "gemini" && result.minimaxConfigured === undefined && geminiReady) {
+      setStatus("ready", "Gemini key configured");
+    } else if (geminiReady) {
+      setStatus(
+        "error",
+        "MiniMax needs attention",
+        "Text tutor connection unavailable",
+        result.message || "Gemini remains available for current web research and image analysis. General text answers require a working MiniMax connection."
+      );
+    } else if (providerConfigured) {
       setStatus("ready", "Gemini key configured");
     } else if (providerConfigured === false) {
       setStatus(
         "missing",
         "Tutor unavailable",
-        "Gemini configuration required",
+        "AI provider configuration required",
         result.message || "AI tutoring is temporarily unavailable. Your saved study sessions are still here; please try again later."
       );
     } else {
@@ -752,6 +1037,9 @@ async function sendMessage(rawMessage, isRetry = false) {
         language: conversation.language,
         message: isRetry ? messageText : messageText,
         history,
+        ...(memoryEnabled && studentMemory.length
+          ? { studentMemory: studentMemory.map(item => item.text) }
+          : {}),
         ...(imageDataUrl ? { imageDataUrl } : {}),
       }),
     });
@@ -768,6 +1056,8 @@ async function sendMessage(rawMessage, isRetry = false) {
       id: makeId(),
       role: "assistant",
       content: result.answer,
+      provider: typeof result.provider === "string" ? result.provider : "",
+      providerNotice: typeof result.providerNotice === "string" ? result.providerNotice.slice(0, 400) : "",
       imageUsage: result.imageUsage && typeof result.imageUsage === "object"
         ? {
             inputTokens: Number(result.imageUsage.inputTokens) || 0,
@@ -791,7 +1081,11 @@ async function sendMessage(rawMessage, isRetry = false) {
     conversation.updatedAt = new Date().toISOString();
     retryMessage = "";
     if (result.answer) {
-      setStatus("ready", "Tutor ready");
+      if (result.providerNotice) {
+        setStatus("error", "Gemini fallback", "MiniMax connection unavailable", result.providerNotice);
+      } else {
+        setStatus("ready", result.provider === "minimax" ? "MiniMax answered" : "Tutor ready");
+      }
     }
   } catch (error) {
     retryMessage = messageText;
@@ -817,11 +1111,17 @@ async function sendMessage(rawMessage, isRetry = false) {
         ? "The online AI Tutor could not connect. No on-device AI model is installed. Your message remains in this conversation on this device; reconnect to retry."
         : error.message || "Please check your connection and try again.";
     }
-    if (error.code === "SETUP_REQUIRED") providerConfigured = false;
+    if (error.code === "SETUP_REQUIRED" || error.code === "MINIMAX_SETUP_REQUIRED") {
+      providerConfigured = geminiConfigured ? true : false;
+    }
     if (usedOfflineTutor) {
       // The on-device answer is already labeled and saved in this conversation.
     } else if (error.code === "GEMINI_GROUNDING_LIMIT" || error.code === "GEMINI_RATE_LIMIT") {
       setStatus("error", "Search limit reached", "Google Search or Gemini limit reached", retryError);
+    } else if (error.code === "MINIMAX_BILLING_REQUIRED") {
+      setStatus("error", "MiniMax unavailable", "MiniMax account has no API balance", retryError);
+    } else if (error.code === "MINIMAX_SETUP_REQUIRED") {
+      setStatus("error", "MiniMax needs attention", "Text tutor connection unavailable", retryError);
     } else if (error.code === "GEMINI_VISION_LIMIT") {
       setStatus("error", "Image limit reached", "Monthly Gemini image-analysis limit reached", retryError);
     } else if (error.code === "GEMINI_GROUNDING_UNAVAILABLE") {
@@ -847,7 +1147,7 @@ async function sendMessage(rawMessage, isRetry = false) {
 function runQuickPrompt(type) {
   const grade = Number(elements.gradeSelect.value);
   const prompt = type === "practice"
-    ? `Create one Grade ${grade} National University Entrance Examination practice question. Give me the question first, then wait for my answer before explaining it.`
+    ? `Create one original Grade ${grade} entrance-exam-style practice question. Clearly label it AI-generated practice, not an official past exam. Give me the question first, then wait for my answer before explaining it.`
     : `Please explain this English question in Afaan Oromoo, step by step. I will paste the question next.`;
   if (type === "oromo") {
     elements.languageSelect.value = "om";
@@ -880,6 +1180,20 @@ function closeMobileSidebar() {
 
 elements.newConversation.addEventListener("click", createConversation);
 document.getElementById("newConversationAlt").addEventListener("click", createConversation);
+elements.memoryToggle.addEventListener("click", () => {
+  const open = elements.memoryPanel.hidden;
+  elements.memoryPanel.hidden = !open;
+  elements.memoryToggle.setAttribute("aria-expanded", String(open));
+  if (open) elements.memoryInput.focus();
+});
+elements.memoryAddForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  addMemoryNote(elements.memoryInput.value);
+});
+elements.memoryEnabled.addEventListener("change", () => {
+  memoryEnabled = elements.memoryEnabled.checked;
+  void persistAccountPreferences();
+});
 elements.galleryButton.addEventListener("click", () => elements.galleryInput.click());
 elements.cameraButton.addEventListener("click", () => elements.cameraInput.click());
 elements.galleryInput.addEventListener("change", () => {
@@ -912,6 +1226,10 @@ elements.mobileMenuButton.addEventListener("click", () => {
   else openMobileSidebar();
 });
 elements.sidebarScrim.addEventListener("click", closeMobileSidebar);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") void syncAccountConversations();
+});
+window.addEventListener("focus", () => void syncAccountConversations());
 
 if (conversations.length) {
   activeConversationId = conversations
@@ -925,6 +1243,7 @@ if (conversations.length) {
 renderHistory();
 renderStorageNote();
 renderConversation();
+renderMemoryList();
 updateSendButton();
-checkAssistantStatus();
-syncAccountConversations();
+void checkAssistantStatus();
+void syncAccountConversations();
