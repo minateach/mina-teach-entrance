@@ -156,6 +156,8 @@ try {
   await waitFor('document.querySelectorAll(".message.assistant").length===2');
   assert.equal(await evaluate('Array.from(document.querySelectorAll(".provider-badge")).at(-1)?.textContent'), "MiniMax");
   assert.equal(chatRequests[2].language, "om");
+  assert.ok(chatRequests[2].history.some(message => message.role === "user" && message.content.includes("English algebra question step by step")), "follow-up requests keep earlier user context");
+  assert.ok(chatRequests[2].history.some(message => message.role === "assistant" && message.content.includes("Afaan Oromoo")), "follow-up requests keep earlier assistant context");
   assert.deepEqual(chatRequests[2].studentMemory, ["Use worked examples", "Show algebra steps clearly"]);
 
   await evaluate('document.querySelector("#memoryList .memory-item-actions button").click()');

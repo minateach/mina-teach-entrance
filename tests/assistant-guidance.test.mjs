@@ -46,6 +46,7 @@ test("tutor guidance is respectful, balanced, and factual in every supported rep
     assert.match(instructions, /education and career/i);
     assert.match(instructions, /religious questions/i);
     assert.match(instructions, /historical evidence|history questions/i);
+    assert.match(instructions, /explicit translation requests across English, Afaan Oromoo, and Amharic/i);
     assert.match(instructions, /interpretation/i);
     assert.match(instructions, /state uncertainty/i);
     assert.match(instructions, /do not claim to browse, search, or cite current sources/i);
