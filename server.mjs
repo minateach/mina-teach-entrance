@@ -808,6 +808,7 @@ function publicFilePath(pathname) {
   if (pathname === "/offline-status.js") return "offline-status.js";
   if (pathname === "/manifest.webmanifest") return "manifest.webmanifest";
   if (pathname === "/privacy" || pathname === "/privacy/") return "privacy/index.html";
+  if (pathname === "/terms" || pathname === "/terms/") return "terms/index.html";
   if (pathname.startsWith("/images/")) {
     const imageName = pathname.slice("/images/".length);
     return /^[A-Za-z0-9._-]+\.(?:png|jpe?g|webp)$/i.test(imageName)

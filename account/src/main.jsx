@@ -36,7 +36,7 @@ function AuthPage({ mode }) {
   const isSignIn = mode === "in";
   return <div className="auth-shell"><a className="brand" href="/"><img className="brand-logo" src="/images/0_1000107983_1794514022860.png" srcSet="/images/mina-teach-ai-logo-256.png 256w, /images/mina-teach-ai-logo-512.png 512w, /images/mina-teach-ai-logo-1024.png 1024w" sizes="64px" alt="Dambi Dollo University and Mina Teach AI logo" /><span><b>MINA TEACH AI</b><small>Dhaloota beekumsa omishuudha.</small></span></a><h1>{isSignIn ? "Welcome back" : "Create your student account"}</h1><p>Your learning history will be private to your account.</p>{isSignIn
     ? <SignIn routing="path" path={`${basePath}/sign-in`} signUpUrl={`${basePath}/sign-up`} />
-    : <SignUp routing="path" path={`${basePath}/sign-up`} signInUrl={`${basePath}/sign-in`} />}</div>;
+    : <SignUp routing="path" path={`${basePath}/sign-up`} signInUrl={`${basePath}/sign-in`} />}<p className="auth-policy-links"><a href="/privacy/">Privacy Policy</a> · <a href="/terms/">Terms of Use</a></p></div>;
 }
 
 function AccountPage() {
@@ -89,7 +89,7 @@ function AccountPage() {
     const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "mina-teach-account-data.json"; link.click(); URL.revokeObjectURL(url);
   };
   const deleteData = async () => {
-    if (!window.confirm("Delete saved conversations, study progress, preferences, offline downloads, and device-only exam results from this account and this browser? This cannot be undone.")) return;
+    if (!window.confirm("Delete supported saved account records and this browser’s local Mina Teach data, downloads, images, reminder settings, and device-only exam results? The Clerk sign-in account and separately stored online exam attempts and question bookmarks will remain.")) return;
     setBusy(true);
     try {
       await request("/api/account/data", { method: "DELETE" });
@@ -98,11 +98,15 @@ function AccountPage() {
       localStorage.removeItem(`minaTeach.learning.v1:${offlineOwner}`);
       localStorage.removeItem(`minaTeach.exam.bookmarks.v1:${encodeURIComponent(offlineOwner)}`);
       localStorage.removeItem(`mina-teach-active-exam-v2:${encodeURIComponent(offlineOwner)}`);
+      const encodedOfflineOwner = encodeURIComponent(offlineOwner);
+      localStorage.removeItem(`minaTeach.studyNotifications.v1:${encodedOfflineOwner}`);
+      localStorage.removeItem(`minaTeach.studyNoticeFeed.v1:${encodedOfflineOwner}`);
+      localStorage.removeItem(`minaTeach.studyReminder.lastDay:${encodedOfflineOwner}`);
       const imagesDeleted = await deleteLocalAssistantImages();
       const offlineDataDeleted = await clearOfflineOwner(offlineOwner).then(() => true).catch(() => false);
       setRecords({}); setPreferences({ language: "en" });
       setNotice(imagesDeleted && offlineDataDeleted
-        ? "Your saved Mina Teach data, offline downloads, device-only exam results, and local image attachments were deleted. Your sign-in account remains active."
+        ? "Supported saved account records and this browser’s local Mina Teach data were deleted. Your sign-in account and separately stored online exam attempts and question bookmarks remain. Email minaseyfufa@gmail.com for help with those records."
         : "Your server account data was deleted. Some local browser attachments or downloads could not be confirmed as removed; close other Mina Teach tabs and repeat deletion to retry.");
     }
     catch (error) { setNotice(error.message); }
@@ -126,14 +130,14 @@ function AccountPage() {
   };
   const count = value => Array.isArray(value) ? value.length : value && typeof value === "object" ? Object.keys(value).length : 0;
   return <main className="account">
-    <header className="account-header"><a className="brand" href="/"><img className="brand-logo" src="/images/0_1000107983_1794514022860.png" srcSet="/images/mina-teach-ai-logo-256.png 256w, /images/mina-teach-ai-logo-512.png 512w, /images/mina-teach-ai-logo-1024.png 1024w" sizes="64px" alt="Dambi Dollo University and Mina Teach AI logo" /><span><b>MINA TEACH AI</b><small>Dhaloota beekumsa omishuudha.</small></span></a><div><a href="/learning/">Learning</a><a href="/assistant/">AI Assistant</a><a href="/image-studio/">Image Studio</a><button onClick={() => signOut({ redirectUrl: "/" })}>Sign out</button></div></header>
+    <header className="account-header"><a className="brand" href="/"><img className="brand-logo" src="/images/0_1000107983_1794514022860.png" srcSet="/images/mina-teach-ai-logo-256.png 256w, /images/mina-teach-ai-logo-512.png 512w, /images/mina-teach-ai-logo-1024.png 1024w" sizes="64px" alt="Dambi Dollo University and Mina Teach AI logo" /><span><b>MINA TEACH AI</b><small>Dhaloota beekumsa omishuudha.</small></span></a><div><a href="/learning/">Learning</a><a href="/assistant/">AI Assistant</a><a href="/image-studio/">Image Studio</a><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><button onClick={() => signOut({ redirectUrl: "/" })}>Sign out</button></div></header>
     <section className="account-card">
       <p className="eyebrow">STUDENT ACCOUNT</p><h1>Hello, {user.firstName || "student"}</h1><p className="muted">{user.primaryEmailAddress?.emailAddress}</p><p className="status" role="status">{status}</p>
       <form onSubmit={saveProfile} className="preferences"><label>Profile name<input value={profileName} maxLength={100} onChange={event => setProfileName(event.target.value)} required /></label><button disabled={busy}>Save profile</button></form>
       <form onSubmit={savePreferences} className="preferences"><label>Reply language<select value={preferences.language || "en"} onChange={event => setPreferences({ ...preferences, language: event.target.value })}><option value="en">English</option><option value="om">Afaan Oromoo</option><option value="am">Amharic</option></select></label><button disabled={busy}>Save preferences</button></form>
-      <section className="data-section"><h2>Your saved data</h2><p>Conversations: {count(records.conversations)} · Learning records: {count(records.learning)}</p><div className="actions"><button disabled={busy} onClick={importLocal}>Import this browser’s study data</button><button className="secondary" onClick={exportData}>Download a copy</button><button className="danger" disabled={busy} onClick={deleteData}>Delete saved Mina Teach data</button></div><p className="muted small">Import copies data to your account and leaves the browser copy unchanged. Delete removes your stored Mina Teach data but does not delete your sign-in account.</p><p className="muted small">Assistant images and offline lesson downloads are saved only on this device and are not included in account downloads. Delete saved data removes them from this browser.</p>{notice && <p className="notice" role="status">{notice}</p>}</section>
+      <section className="data-section"><h2>Your saved data</h2><p>Conversations: {count(records.conversations)} · Learning records: {count(records.learning)} · Preference fields: {count(records.preferences)}</p><p className="muted small">Review conversations in AI Assistant, learning progress in Learning, and exam history or saved questions in Exams. The account page shows record counts rather than each item.</p><div className="actions"><button disabled={busy} onClick={importLocal}>Import this browser’s study data</button><button className="secondary" onClick={exportData}>Download a copy</button><button className="danger" disabled={busy} onClick={deleteData}>Delete saved Mina Teach data</button></div><p className="muted small">Import copies browser conversations and learning records to your account; it leaves the browser copy unchanged. Download includes your profile name/email and saved conversations, learning records, and preferences. It does not include separately stored online exam attempts or question bookmarks, or device-only downloads and images.</p><p className="muted small">Delete removes saved account records and this browser’s Mina Teach local study data, offline downloads, notification settings, and image attachments. It does not delete your Clerk sign-in account or separately stored online exam attempts and question bookmarks. Email <a href="mailto:minaseyfufa@gmail.com">minaseyfufa@gmail.com</a> for requests about those items; this page does not provide a bulk-delete control for them.</p>{notice && <p className="notice" role="status">{notice}</p>}</section>
     </section>
-    <p className="privacy">Your account is used to save your Mina Teach conversations and learning progress. You control importing, downloading, and deleting these saved records.</p>
+    <p className="privacy">Your account is used to save Mina Teach conversations, learning records, and preferences. Read the <a href="/privacy/">Privacy Policy</a> and <a href="/terms/">Terms of Use</a> for current data and service details.</p>
   </main>;
 }
 

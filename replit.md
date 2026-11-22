@@ -42,9 +42,19 @@ existing work.
   changed. Do not add bearer tokens to browser requests.
 - Signed-in conversations, learning records, and preferences are stored in the
   Replit PostgreSQL development database and scoped to the Clerk user ID.
-- Existing browser data remains local until the student explicitly imports it.
-  Deleting saved Mina Teach data removes the account copy and the two supported
-  browser copies; it does not delete the Clerk sign-in account.
+- New signed-in conversations and learning changes can synchronize to account
+  records. Guest/browser history is not automatically imported; the student
+  must use the explicit Account import control.
+- Account export contains the profile name/email and the `conversations`,
+  `learning`, and `preferences` records. Online exam attempts and saved exam
+  question bookmarks are stored separately and are not included in that export.
+- Account deletion removes `mina_user_records` and supported Mina Teach browser
+  data, including account-owned offline downloads, device-only results, local
+  notification preferences/feed, and browser image attachments. It does not
+  delete the Clerk sign-in identity or separately stored online exam attempts
+  and question bookmarks. Students can remove individual saved questions in
+  Exams, but there is no current bulk-delete control for those separate rows;
+  the Privacy Policy gives the contact address for help.
 - All users receive the `student` role by default. The one-time development
   first-admin claim is restricted to the owner's verified email, stored only as
   a SHA-256 digest, and consumed atomically. Never add public self-service role
@@ -56,6 +66,30 @@ existing work.
   questions. Teachers can author drafts; reviewers can manage and approve
   sourced questions. Student exams may only use approved, source-labeled
   curriculum questions; AI-generated practice stays separate from that bank.
+
+## PostgreSQL recovery guidance
+
+- The app uses Replit PostgreSQL through `DATABASE_URL`. Replit keeps development
+  and production databases separate.
+- **Development data:** Replit documents no separate development-database backup.
+  Development data is recovered by rolling the whole project back to an Agent
+  checkpoint. A checkpoint rollback affects project files as well as database
+  state; review the checkpoint and its consequences before restoring.
+- **Production data:** Replit documents point-in-time recovery (PITR) as enabled
+  by default, with a 7-day recovery window that can extend to 28 days on Pro and
+  Enterprise plans. Optional scheduled daily snapshots are configured in the
+  production Database tool’s **Settings** tab; retention depends on the plan
+  and may be 7–28 days.
+- The app cannot see whether production snapshots are enabled or which recovery
+  window is active. Before relying on recovery, open the Database tool, select
+  the production database, and verify the current Settings and restore points.
+  Replit warns that restoring production replaces live data with the selected
+  point and is irreversible; changes made after that point are lost. Confirm
+  the target and exact timestamp before restoring, then verify the app.
+- Do not add application-level database dumps, shadow tables, or unapproved data
+  copies. Follow Replit’s current guidance:
+  - [Data recovery](https://docs.replit.com/features/data-and-storage/data-recovery)
+  - [Development and production databases](https://docs.replit.com/features/data-and-storage/development-and-production)
 
 ## Education system checks
 
@@ -72,6 +106,8 @@ existing work.
 - `npm run test:materials-browser`: checks long-form and structured material
   rendering, pagination, retry and completion gates, including browser-only
   technical fixtures that are not published to students.
+- `npm run test:privacy-browser`: checks public privacy/terms routes, navigation,
+  accessibility landmarks, and phone/desktop layout without signing in.
 - `npm run audit:materials`: compares available stored/bundled material with the
   API and reports missing curriculum coverage separately.
 
@@ -94,6 +130,7 @@ creation, account synchronization, or educator publishing.
   deploy Bubblewrap's Digital Asset Links file at
   `/.well-known/assetlinks.json`. No fingerprint or signing credential is
   currently stored in this repository.
-- The public privacy-policy draft is at `/privacy/`; store listing, Data safety,
-  content-rating notes, screenshots, and the release checklist are in
-  `play-store/`. These are owner-review materials, not proof of Play compliance.
+- The public privacy-policy and Terms of Use drafts are at `/privacy/` and
+  `/terms/`. Store listing, Data safety, content-rating notes, screenshots, and
+  the release checklist are in `play-store/`. These are owner-review materials,
+  not proof of Play compliance.
