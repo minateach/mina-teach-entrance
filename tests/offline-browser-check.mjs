@@ -37,9 +37,11 @@ try {
   assert.equal(await evaluate('document.getElementById("offline-storage-usage").textContent.includes("40 MB")'),true,"device storage usage and capacity are displayed");
   await evaluate('const t=document.getElementById("offline-mode-toggle");t.checked=true;t.dispatchEvent(new Event("change",{bubbles:true}))');
   assert.equal(await evaluate('localStorage.getItem("minaTeach.offlineMode.v1")==="on"'),true,"Offline Mode setting is saved");
+  const apiRequestCount=browser.requests.filter(url=>new URL(url).pathname.startsWith("/api/")).length;
   await navigate(lessonUrl,'document.getElementById("lesson-page") && document.querySelector(".lesson-page h2")');
   assert.match(await evaluate('document.getElementById("offline-connection-status").textContent'),/Offline Mode is on/);
   assert.match(await evaluate('document.querySelector(".lesson-page").textContent'),/Complete lesson notes|Introduction/);
+  assert.equal(browser.requests.filter(url=>new URL(url).pathname.startsWith("/api/")).length,apiRequestCount,"manual Offline Mode opens the downloaded lesson without API requests");
   await evaluate('const t=document.getElementById("offline-mode-toggle");t.checked=false;t.dispatchEvent(new Event("change",{bubbles:true}))');
   await setOffline(true);
   await navigate(lessonUrl,'document.getElementById("lesson-page") && document.querySelector(".lesson-page h2")');
@@ -114,6 +116,9 @@ try {
   await setOffline(false);
   await navigate("/learning/?grade=9&language=en",'document.getElementById("coverage-status").textContent.includes("available lessons")');
   assert.match(await evaluate('document.getElementById("quiz-progress").textContent'),/Downloaded reviewed offline practice/);
+  await evaluate('document.getElementById("download-grade-offline").click()');
+  await waitFor('document.getElementById("offline-bulk-status").textContent.includes("saved across")');
+  assert.match(await evaluate('document.getElementById("offline-bulk-status").textContent'),/Grade 9: \d+ of \d+ lessons saved across \d+ subjects/,"grade-wide download reports its completed scope");
   await setOffline(true);
   await navigate("/assistant/",'document.getElementById("messageInput") && document.getElementById("statusBanner").dataset.visible==="true"');
   assert.match(await evaluate('document.getElementById("statusBanner").textContent'),/AI Tutor works online only/);

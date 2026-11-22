@@ -350,6 +350,7 @@ export async function makeOfflineGradeDownload({ grade, language = "en", owner =
     } catch (error) {
       errors.push(`${subject.name}: ${error.message}`);
     }
+    if (errors.some(message => message.includes("Offline storage is full"))) break;
   }
   return { completed, total, subjectCount: subjects.length, errors };
 }

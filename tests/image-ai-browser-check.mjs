@@ -144,7 +144,10 @@ try {
     await waitFor('(Number.isFinite(document.getElementById("videoPreview").duration) && document.getElementById("videoPreview").duration>0) || document.getElementById("videoStatus").dataset.state==="error"');
     const videoMetadata=await evaluate("JSON.stringify({duration:document.getElementById('videoPreview').duration,error:document.getElementById('videoPreview').error?.message,status:document.getElementById('videoStatus').textContent,source:document.getElementById('videoPreview').src.slice(0,70),currentSource:document.getElementById('videoPreview').currentSrc.slice(0,70),file:document.getElementById('videoFile').files?.[0]?.name,type:document.getElementById('videoFile').files?.[0]?.type,size:document.getElementById('videoFile').files?.[0]?.size})");
     assert.ok(await evaluate('Number.isFinite(document.getElementById("videoPreview").duration) && document.getElementById("videoPreview").duration>0'),`generated test video could not load: ${videoMetadata}`);
-    await evaluate("document.getElementById('videoTrimEnd').value='0.5';document.getElementById('videoTrimEnd').dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('trimVideo').click()");
+    await evaluate("document.getElementById('videoTrimEnd').value='0.5';document.getElementById('videoTrimEnd').dispatchEvent(new Event('input',{bubbles:true}))");
+    const trimButton=await evaluate("(()=>{const b=document.getElementById('trimVideo');b.scrollIntoView({block:'center'});const r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()");
+    await command("Input.dispatchMouseEvent",{type:"mousePressed",x:trimButton.x,y:trimButton.y,button:"left",clickCount:1});
+    await command("Input.dispatchMouseEvent",{type:"mouseReleased",x:trimButton.x,y:trimButton.y,button:"left",clickCount:1});
     await waitFor('!document.getElementById("downloadVideo").hidden || document.getElementById("videoStatus").dataset.state==="error"');
     const trimStatus=await evaluate("document.getElementById('videoStatus').textContent");
     assert.equal(await evaluate('!document.getElementById("downloadVideo").hidden'),true,`offline trim did not export: ${trimStatus}`);

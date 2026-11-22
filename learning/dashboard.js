@@ -71,7 +71,7 @@ async function renderOfflineDownloads() {
   const box=$("offline-download-list");box.replaceChildren();
   try {
     const [downloads,usage]=await Promise.all([listOfflineDownloads(),getOfflineStorageUsage()]);
-    $("offline-storage-usage").textContent=`${(usage.bytes/1024/1024).toFixed(1)} MB / ${(usage.limitBytes/1024/1024).toFixed(0)} MB · ${usage.lessonCount} lessons · ${usage.questionSetCount} question sets`;
+    $("offline-storage-usage").textContent=`${(usage.bytes/1024/1024).toFixed(1)} MB / ${(usage.limitBytes/1024/1024).toFixed(0)} MB · ${usage.lessonCount} lessons · ${usage.questionSetCount} question sets · ${usage.resultCount} results`;
     if(!downloads.length){box.append(node("p","No offline downloads yet. Open a lesson or practice page while online to save content.","muted"));return;}
     downloads.forEach(item=>{
       const row=node("div",undefined,"saved-chip");

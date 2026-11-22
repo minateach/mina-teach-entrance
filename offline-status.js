@@ -46,12 +46,12 @@
     toggle.checked = enabled();
     if (navigator.onLine) {
       message.textContent = enabled()
-        ? "Offline Mode is on · Learning uses downloaded content only. AI tutoring still uses internet."
+        ? "Offline Mode is on · Learning uses downloaded content only. AI tutor and AI image tools still need internet."
         : "Online · Download lessons and question sets to study without internet.";
       status.style.background = enabled() ? "#eaf2ff" : "#eef8f1";
       status.style.color = enabled() ? "#17449a" : "#17633a";
     } else {
-      message.textContent = "Offline · Downloaded lessons and practice sets work here. AI tutoring, sign-in, and account sync need internet.";
+      message.textContent = "Offline · Downloaded lessons and practice sets work here. AI tools, sign-in, and account sync need internet.";
       status.style.background = "#fff4df";
       status.style.color = "#7a4a00";
     }
