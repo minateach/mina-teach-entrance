@@ -19,7 +19,7 @@ async function tapExpression(expression){
 const tap=selector=>tapExpression(`document.querySelector(${JSON.stringify(selector)})`);
 const tapLink=(text,selector="a")=>tapExpression(`[...document.querySelectorAll(${JSON.stringify(selector)})].find(a=>a.textContent.trim()===${JSON.stringify(text)})`);
 const tapHref=(href,selector="a")=>tapExpression(`[...document.querySelectorAll(${JSON.stringify(selector)})].find(a=>a.getAttribute("href")===${JSON.stringify(href)})`);
-const dashboardReady='document.querySelectorAll(".subject-card").length===18';
+const dashboardReady='document.querySelectorAll(".subject-card").length===17';
 async function choose(id,value){await evaluate(`document.getElementById(${JSON.stringify(id)}).value=${JSON.stringify(String(value))};document.getElementById(${JSON.stringify(id)}).dispatchEvent(new Event("change",{bubbles:true}))`);await waitFor(dashboardReady);assert.equal(await evaluate(`document.getElementById(${JSON.stringify(id)}).value`),String(value));}
 const courseReady='document.querySelector("#subjects h2")?.textContent.includes("Chapters and lessons")';
 const lessonReady=id=>`document.getElementById("lesson-page") && new URLSearchParams(location.search).get("lesson")===${JSON.stringify(id)}`;

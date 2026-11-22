@@ -102,8 +102,8 @@ try {
   assert.equal(browser.requests.filter(url=>new URL(url).pathname.startsWith("/api/")).length,apiRequestCount,"manual Offline Mode opens the downloaded lesson without API requests");
   await evaluate('const t=document.getElementById("offline-mode-toggle");t.checked=false;t.dispatchEvent(new Event("change",{bubbles:true}))');
   await setOffline(true);
-  await navigate("/learning/?grade=10&language=en",'document.querySelectorAll(".course-card").length===18');
-  assert.equal(await evaluate('document.querySelectorAll(".course-card").length'),18,"offline dashboard starts from its cached catalog and shell");
+  await navigate("/learning/?grade=10&language=en",'document.querySelectorAll(".course-card").length===17');
+  assert.equal(await evaluate('document.querySelectorAll(".course-card").length'),17,"offline dashboard starts from its cached catalog and shell");
   await navigate(lessonUrl,'document.getElementById("lesson-page") && document.querySelector(".lesson-page h2")');
   assert.match(await evaluate('document.getElementById("offline-connection-status").textContent'),/Offline/);
   assert.match(await evaluate('document.querySelector(".lesson-page").textContent'),/Complete lesson notes|Introduction/);

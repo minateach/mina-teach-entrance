@@ -8,6 +8,7 @@ import { publishableKeyFromHost } from "@clerk/shared/keys";
 import { ReplitConnectors } from "@replit/connectors-sdk";
 import pg from "pg";
 import { createLearningCatalog, LearningInputError } from "./server/learning-catalog.mjs";
+import { createGeneralKnowledgeCenter, GeneralKnowledgeError } from "./server/general-knowledge.mjs";
 import { buildTutorInstructions, resolveFounderResponse } from "./server/assistant-guidance.mjs";
 import { getExamHistory } from "./server/student-analytics.mjs";
 import {materialProblem,materialsProblem} from "./server/lesson-materials.mjs";
@@ -52,6 +53,7 @@ const { Pool } = pg;
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const minimaxConnectors = new ReplitConnectors();
 const learningCatalog = createLearningCatalog(pool);
+const generalKnowledgeCenter = createGeneralKnowledgeCenter(pool);
 const allowedRecordTypes = new Set(["conversations", "learning", "preferences"]);
 const chatRateWindows = new Map();
 const chatRateWindowMs = 60_000;
@@ -768,10 +770,12 @@ function publicFilePath(pathname) {
   if (pathname === "/learning" || pathname === "/learning/") {
     return "learning/index.html";
   }
+  if (pathname === "/learning/knowledge" || pathname === "/learning/knowledge/") return "learning/knowledge.html";
   if (pathname === "/exams" || pathname === "/exams/") return "exams/index.html";
   if (new Set(["/exams/app.js", "/exams/styles.css", "/exams/bootstrap.js"]).has(pathname)) return pathname.slice(1);
   if (pathname === "/admin" || pathname === "/admin/") return "admin/index.html";
-  if (new Set(["/admin/app.js", "/admin/styles.css"]).has(pathname)) return pathname.slice(1);
+  if (pathname === "/admin/knowledge" || pathname === "/admin/knowledge/") return "admin/knowledge.html";
+  if (new Set(["/admin/app.js", "/admin/styles.css", "/admin/knowledge.js", "/admin/knowledge.css"]).has(pathname)) return pathname.slice(1);
   if (pathname === "/account" || pathname === "/account/" || pathname.startsWith("/account/sign-in") || pathname.startsWith("/account/sign-up")) {
     return "account-dist/index.html";
   }
@@ -783,7 +787,7 @@ function publicFilePath(pathname) {
   if (allowedTopLevelFiles.has(pathname)) return pathname.slice(1);
   if (pathname.startsWith("/assistant/")) return pathname.slice(1);
   if (pathname.startsWith("/image-studio/")) return pathname.slice(1);
-  if (new Set(["/learning/app.js", "/learning/styles.css", "/learning/library.css", "/learning/analytics.css", "/learning/analytics.js", "/learning/notifications.css", "/learning/study-notifications.js", "/learning/history-grade10.js", "/learning/dashboard.js", "/learning/learning-state.js", "/learning/lesson-view.js", "/learning/material-reader.js", "/learning/offline-store.js", "/learning/coverage.html", "/learning/coverage.js"]).has(pathname)) {
+  if (new Set(["/learning/app.js", "/learning/styles.css", "/learning/library.css", "/learning/analytics.css", "/learning/analytics.js", "/learning/notifications.css", "/learning/study-notifications.js", "/learning/history-grade10.js", "/learning/dashboard.js", "/learning/learning-state.js", "/learning/lesson-view.js", "/learning/material-reader.js", "/learning/offline-store.js", "/learning/coverage.html", "/learning/coverage.js", "/learning/knowledge.html", "/learning/knowledge.js", "/learning/knowledge.css"]).has(pathname)) {
     return pathname.slice(1);
   }
   return null;
@@ -1289,6 +1293,98 @@ app.post("/api/learning/lessons/:id/review", requireAuth, requireRole(...reviewR
     if (!result.rowCount) { sendError(response, 404, "LESSON_NOT_FOUND", "Lesson not found."); return; }
     sendJson(response, 200, { status: input.status });
   } catch { sendError(response, 500, "LESSON_REVIEW_FAILED", "The lesson review could not be saved."); }
+});
+
+app.get("/api/general-knowledge/categories", async (request, response) => {
+  try {
+    sendJson(response, 200, await generalKnowledgeCenter.categories(request.query.language || "en"));
+  } catch (error) {
+    sendError(response, error instanceof GeneralKnowledgeError ? error.status : 503, "GENERAL_KNOWLEDGE_LOAD_FAILED",
+      error instanceof GeneralKnowledgeError ? error.message : "General Knowledge categories could not be loaded.");
+  }
+});
+
+app.get("/api/general-knowledge/lessons", async (request, response) => {
+  try {
+    sendJson(response, 200, await generalKnowledgeCenter.lessons(request.query));
+  } catch (error) {
+    sendError(response, error instanceof GeneralKnowledgeError ? error.status : 503, "GENERAL_KNOWLEDGE_LOAD_FAILED",
+      error instanceof GeneralKnowledgeError ? error.message : "General Knowledge lessons could not be loaded.");
+  }
+});
+
+app.get("/api/general-knowledge/lessons/:slug", async (request, response) => {
+  try {
+    const lesson = await generalKnowledgeCenter.lesson(request.params.slug, request.query.language || "en");
+    if (!lesson) {
+      sendError(response, 404, "GENERAL_KNOWLEDGE_NOT_FOUND", "This lesson is not available or has not been reviewed and published.");
+      return;
+    }
+    sendJson(response, 200, { lesson });
+  } catch (error) {
+    sendError(response, error instanceof GeneralKnowledgeError ? error.status : 503, "GENERAL_KNOWLEDGE_LOAD_FAILED",
+      error instanceof GeneralKnowledgeError ? error.message : "The lesson could not be loaded.");
+  }
+});
+
+app.get("/api/general-knowledge/manage", requireAuth, requireRole(...contentRoles), async (request, response) => {
+  try {
+    sendJson(response, 200, await generalKnowledgeCenter.manageList(request.query));
+  } catch (error) {
+    sendError(response, error instanceof GeneralKnowledgeError ? error.status : 503, "GENERAL_KNOWLEDGE_REVIEW_LOAD_FAILED",
+      error instanceof GeneralKnowledgeError ? error.message : "The review queue could not be loaded.");
+  }
+});
+
+app.get("/api/general-knowledge/manage/:slug", requireAuth, requireRole(...contentRoles), async (request, response) => {
+  try {
+    const lesson = await generalKnowledgeCenter.manageLesson(request.params.slug, request.query.language || "en");
+    if (!lesson) {
+      sendError(response, 404, "GENERAL_KNOWLEDGE_NOT_FOUND", "This draft was not found.");
+      return;
+    }
+    sendJson(response, 200, { lesson });
+  } catch (error) {
+    sendError(response, error instanceof GeneralKnowledgeError ? error.status : 503, "GENERAL_KNOWLEDGE_REVIEW_LOAD_FAILED",
+      error instanceof GeneralKnowledgeError ? error.message : "The draft could not be loaded.");
+  }
+});
+
+app.post("/api/general-knowledge/manage", requireAuth, requireRole(...contentRoles), async (request, response) => {
+  try {
+    if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
+    const input = await readJsonBody(request, 2_097_152);
+    sendJson(response, 201, await generalKnowledgeCenter.save(input, request.userId));
+  } catch (error) {
+    sendError(response, error instanceof GeneralKnowledgeError ? error.status : error.statusCode || 503, "GENERAL_KNOWLEDGE_SAVE_FAILED",
+      error instanceof GeneralKnowledgeError ? error.message : error.message || "The lesson draft could not be saved.");
+  }
+});
+
+app.put("/api/general-knowledge/manage/:slug", requireAuth, requireRole(...contentRoles), async (request, response) => {
+  try {
+    if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
+    const input = await readJsonBody(request, 2_097_152);
+    sendJson(response, 200, await generalKnowledgeCenter.save(input, request.userId, request.params.slug));
+  } catch (error) {
+    sendError(response, error instanceof GeneralKnowledgeError ? error.status : error.statusCode || 503, "GENERAL_KNOWLEDGE_SAVE_FAILED",
+      error instanceof GeneralKnowledgeError ? error.message : error.message || "The lesson draft could not be saved.");
+  }
+});
+
+app.post("/api/general-knowledge/manage/:slug/review", requireAuth, requireRole(...reviewRoles), async (request, response) => {
+  try {
+    if (!isSameOrigin(request)) { sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed."); return; }
+    const input = await readJsonBody(request);
+    const result = await generalKnowledgeCenter.review(
+      request.params.slug, input.language || request.query.language || "en", input.status, request.userId,
+    );
+    if (!result) { sendError(response, 404, "GENERAL_KNOWLEDGE_NOT_FOUND", "This lesson draft was not found."); return; }
+    sendJson(response, 200, result);
+  } catch (error) {
+    sendError(response, error instanceof GeneralKnowledgeError ? error.status : 503, "GENERAL_KNOWLEDGE_REVIEW_FAILED",
+      error instanceof GeneralKnowledgeError ? error.message : "The lesson review could not be saved.");
+  }
 });
 
 app.get("/api/questions", async (request, response) => {

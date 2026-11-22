@@ -37,3 +37,27 @@ use the existing whole-record account API.
 running preview through `REPLIT_DEV_DOMAIN`, then closes it. Tests exercise
 public/device journeys and rejection of unauthenticated protected requests.
 They do not bypass authentication or claim to verify a real signed-in session.
+
+## Separate General Knowledge Center
+
+`/learning/knowledge/` is a separate library built from the twenty-category
+taxonomy in the user's uploaded requirements. It does not use a grade, stream,
+or curriculum chapter. Public search and lesson routes return only database
+entries reviewed and published in the requested language. The page uses the
+existing learning store for saves, topic bookmarks, and completion keys.
+
+`/admin/knowledge/` uses the existing server-side content roles. Editors can
+save drafts; only question reviewers and administrators can publish or reject.
+Publishing requires complete lesson sections, traceable references marked
+verified by the reviewer, and a verified translation for Afaan Oromoo or
+Amharic. English starter drafts remain drafts until a reviewer checks their
+source details. Draft records are never returned to students.
+
+The initial authoring batch contains eleven English drafts based only on the
+uploaded Grade 9 Biology, Grade 9 History, Grade 10 Mathematics, and Grade 10
+Geography Teacher Guide PDFs. The Geography source is explicitly identified as
+a teacher guide. Nine requested categories have no local source-backed lesson
+yet; their empty states report the gap rather than showing placeholder content.
+No unreviewed Afaan Oromoo or Amharic version is claimed. This is a starting
+batch, not complete coverage of all twenty categories or every material that
+may exist elsewhere.

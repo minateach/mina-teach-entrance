@@ -19,7 +19,8 @@ try {
   await navigate("/",'document.querySelectorAll("a.card").length >= 10');
   assert.equal(await evaluate('document.querySelector(".hero .btn").getAttribute("href")'),"/learning/");
   await evaluate('document.querySelector(".hero .btn").click()');
-  await waitFor('location.pathname==="/learning/" && document.querySelectorAll(".course-card").length===18');
+  await waitFor('location.pathname==="/learning/" && document.querySelectorAll(".course-card").length===17');
+  assert.equal(await evaluate('document.querySelector(".knowledge-promo a")?.getAttribute("href")'),"/learning/knowledge/");
   await navigate("/learning/?grade=10&language=en");
   await evaluate('localStorage.setItem("minaTeach.learning.v1",JSON.stringify({completed:["9:natural:Mathematics:0","nonexistent"],tasks:[{text:"Preserve my planner task",done:false}]}))');
   await navigate("/learning/?grade=10&language=en");
@@ -31,7 +32,7 @@ try {
   assert.equal(await evaluate('document.getElementById("task-count").textContent'),"1");
   await evaluate('document.querySelectorAll("#task-list button")[1].click()');
   assert.doesNotMatch(await evaluate('document.getElementById("task-list").textContent'),/Temporary planner check/);
-  assert.equal(await evaluate('document.querySelectorAll(".course-card").length'),18);
+  assert.equal(await evaluate('document.querySelectorAll(".course-card").length'),17);
   assert.equal(browser.requests.some(url=>url.endsWith("/learning/history-grade10.js")),false,"no entire bundled curriculum script downloaded");
   assert.equal(browser.requests.some(url=>url.includes("/api/learning/content/")),false,"dashboard loads summaries only");
   const inlinePractice=await evaluate('[...document.querySelectorAll(".course-card")].find(card=>card.querySelector(".subject-card").getAttribute("aria-label").includes("History")).querySelector(".subject-practice").getAttribute("href")');

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#F5F7FB">
+  <link rel="icon" href="/images/mina-teach-ai-favicon.png" type="image/png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/learning/styles.css">
+  <link rel="stylesheet" href="/learning/knowledge.css">
+  <link rel="stylesheet" href="/styles/mina-teach-theme.css">
+  <title>MINA TEACH AI | General Knowledge</title>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">
+      <img src="/images/0_1000107983_1794514022860.png" srcset="/images/mina-teach-ai-logo-256.png 256w, /images/mina-teach-ai-logo-512.png 512w, /images/mina-teach-ai-logo-1024.png 1024w" sizes="64px" alt="Dambi Dollo University and Mina Teach AI logo" style="width:clamp(48px,6vw,64px);height:auto;max-height:42px;object-fit:contain;flex:none">
+      <span><strong>MINA TEACH AI</strong><small>Dhaloota beekumsa omishuudha.</small></span>
+    </a>
+    <nav aria-label="Main navigation">
+      <a href="/">Home</a><a href="/learning/">Learning dashboard</a><a href="/account/">Account</a><a href="/assistant/">AI Assistant</a>
+    </nav>
+  </header>
+  <main class="wrap general-knowledge">
+    <section class="knowledge-hero">
+      <div>
+        <p class="eyebrow">EXPLORE BEYOND THE CURRICULUM</p>
+        <h1>General Knowledge Center</h1>
+        <p>Browse source-referenced learning in a separate library. These lessons are not presented as official Ethiopian curriculum units.</p>
+      </div>
+      <a class="button" href="/learning/">Back to Learning</a>
+    </section>
+
+    <section class="knowledge-controls panel" aria-label="Search General Knowledge">
+      <label>Search categories, topics, and lessons
+        <input id="knowledge-search" type="search" maxlength="120" placeholder="Search the published knowledge library" autocomplete="off">
+      </label>
+      <label>Lesson language
+        <select id="knowledge-language">
+          <option value="en">English</option>
+          <option value="om">Afaan Oromoo</option>
+          <option value="am">Amharic</option>
+        </select>
+      </label>
+      <p class="knowledge-language-note">Category labels are in English. Only lessons reviewed and published in the selected language appear; unreviewed translations stay hidden.</p>
+    </section>
+
+    <p id="knowledge-status" class="notice" role="status" aria-live="polite">Loading published categories…</p>
+    <p id="knowledge-progress" class="muted" role="status" aria-live="polite"></p>
+    <section id="knowledge-search-results" class="knowledge-search-results" hidden aria-live="polite"></section>
+    <section id="knowledge-category-view" class="knowledge-category-view" hidden></section>
+    <article id="knowledge-lesson-view" class="knowledge-lesson-view" hidden></article>
+    <section id="knowledge-category-grid" class="knowledge-category-grid" aria-label="General Knowledge categories"></section>
+    <footer>MINA TEACH AI · Dhaloota beekumsa omishuudha.</footer>
+  </main>
+  <script src="/offline-status.js" defer></script>
+  <script type="module" src="/learning/knowledge.js"></script>
+</body>
+</html>

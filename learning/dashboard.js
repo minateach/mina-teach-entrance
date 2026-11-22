@@ -98,6 +98,12 @@ function renderResults() {
 }
 async function openSaved(item,message) {
   try {
+    const knowledge=item.key.match(/^knowledge:(en|om|am):([a-z0-9-]+)(?::topic:(\d+))?$/);
+    if(knowledge) {
+      const params=new URLSearchParams({lesson:knowledge[2],language:knowledge[1]});
+      location.href=`/learning/knowledge/?${params}${knowledge[3]!==undefined?`#topic-${knowledge[3]}`:""}`;
+      return;
+    }
     const id=item.id || (/^lesson:\d+$/.test(item.key)?`db-${item.key.slice(7)}`:
       item.key.startsWith("curriculum:history:10:")?`history10-${item.key.slice("curriculum:history:10:".length)}`:null);
     if(!id)throw new Error("This legacy saved entry has no actual lesson ID. It was preserved, but cannot be opened as a lesson.");
@@ -188,6 +194,7 @@ function renderDashboard() {
   root.className="subject-grid";
   root.replaceChildren();
   catalog.subjects.forEach(subject=>{
+    if(subject.name==="General Knowledge")return;
     const wrapper=node("article",undefined,"course-card");
     const target={...scope,subject:subject.name};
     const a=link("",courseUrl(target),"subject-card");
@@ -264,6 +271,10 @@ async function loadPage(force=false) {
   const rawGrade=params.get("grade") || store.state.settings.grade;
   const language=params.get("language") || store.state.settings.language || "en";
   scope={grade:Number(rawGrade),language,subject:params.get("subject") || ""};
+  if(scope.subject==="General Knowledge") {
+    location.replace(`/learning/knowledge/?${new URLSearchParams({language})}`);
+    return;
+  }
   if(scope.subject==="Civics")scope.subject="Civics and Ethics";
   try {
     if(![9,10,11,12].includes(scope.grade) || !["en","om","am"].includes(language))throw new Error("Invalid grade or language. Choose Grades 9–12 and a supported language.");

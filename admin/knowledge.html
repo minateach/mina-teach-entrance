@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#F5F7FB">
+  <title>MINA TEACH AI | General Knowledge Review</title>
+  <link rel="icon" href="/images/mina-teach-ai-favicon.png" type="image/png">
+  <link rel="stylesheet" href="/admin/styles.css">
+  <link rel="stylesheet" href="/admin/knowledge.css">
+  <link rel="stylesheet" href="/styles/mina-teach-theme.css">
+  <script src="/admin/knowledge.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/"><img src="/images/0_1000107983_1794514022860.png" srcset="/images/mina-teach-ai-logo-256.png 256w, /images/mina-teach-ai-logo-512.png 512w, /images/mina-teach-ai-logo-1024.png 1024w" sizes="64px" alt="Dambi Dollo University and Mina Teach AI logo" style="width:clamp(48px,6vw,64px);height:auto;max-height:42px;object-fit:contain;flex:none"><span><strong>MINA TEACH AI</strong><small>Dhaloota beekumsa omishuudha.</small></span></a>
+    <nav><a href="/admin/">Question review</a><a href="/learning/knowledge/">Student library</a><a href="/learning/">Learning</a><a href="/account/">Account</a></nav>
+  </header>
+  <main class="knowledge-admin">
+    <section id="knowledge-gate" class="panel gate" role="status" aria-live="polite">
+      <p class="eyebrow">SECURE CONTENT REVIEW</p><h1>Checking reviewer access…</h1>
+      <p id="knowledge-gate-message">Your account role is checked by the server.</p>
+      <a class="button" href="/account/sign-in">Sign in to MINA TEACH AI</a>
+    </section>
+    <div id="knowledge-admin-dashboard" hidden>
+      <section class="welcome">
+        <div><p class="eyebrow">GENERAL KNOWLEDGE CENTER</p><h1>Content authoring and review</h1>
+          <p>General knowledge remains separate from grade-specific curriculum. New and edited lessons are drafts until an authorized reviewer approves them.</p></div>
+        <span id="knowledge-role" class="role-badge"></span>
+      </section>
+      <div class="knowledge-admin-grid">
+        <section class="panel">
+          <div class="section-heading"><div><p class="eyebrow">SOURCE-BACKED AUTHORING</p><h2 id="knowledge-form-title">Add a lesson draft</h2></div></div>
+          <form id="knowledge-form">
+            <div class="form-grid">
+              <label>Category<select name="categorySlug" id="knowledge-category" required></select></label>
+              <label>Language<select name="language" id="knowledge-form-language"><option value="en">English</option><option value="om">Afaan Oromoo</option><option value="am">Amharic</option></select></label>
+              <label>Translation review<select name="languageReviewStatus"><option value="not_applicable">English: not applicable</option><option value="pending">Translation not reviewed</option><option value="verified">Translation reviewed</option></select></label>
+              <label>Stable lesson slug<input name="slug" maxlength="100" pattern="[a-z0-9]+(-[a-z0-9]+)*" required></label>
+            </div>
+            <label>Lesson title<input name="title" maxlength="180" required></label>
+            <label>Introduction<textarea name="introduction" rows="5" required></textarea></label>
+            <label>Learning objectives (JSON array)<textarea name="objectives" rows="5" required spellcheck="false"></textarea></label>
+            <label>Topics and subtopics (JSON array)<textarea name="topics" rows="9" required spellcheck="false"></textarea></label>
+            <label>Important terms and definitions (JSON array)<textarea name="definitions" rows="5" required spellcheck="false"></textarea></label>
+            <label>Examples (JSON array)<textarea name="examples" rows="5" required spellcheck="false"></textarea></label>
+            <label>Exercises with answers and explanations (JSON array)<textarea name="exercises" rows="6" required spellcheck="false"></textarea></label>
+            <label>Lesson summary<textarea name="summary" rows="4" required></textarea></label>
+            <label>Revision questions with answers (JSON array)<textarea name="revisionQuestions" rows="6" required spellcheck="false"></textarea></label>
+            <label>Traceable sources and page locations (JSON array)<textarea name="sources" rows="7" required spellcheck="false"></textarea></label>
+            <label>Related lesson slugs (one per line)<textarea name="relatedSlugs" rows="3"></textarea></label>
+            <p class="muted">A source reference needs a title and either an HTTPS URL or a local PDF filename with a page location. Set verificationStatus to "verified" only after checking the cited material. Afaan Oromoo and Amharic drafts remain hidden until translation review is also verified. Published lessons require an introduction, topics and subtopics, definitions, examples, answered exercises, summary, answered revision questions, and verified references.</p>
+            <div class="actions"><button type="submit">Save as draft</button><button type="button" class="secondary" id="knowledge-cancel-edit" hidden>Cancel edit</button></div>
+            <p id="knowledge-form-status" role="status" aria-live="polite"></p>
+          </form>
+        </section>
+        <section class="panel">
+          <div class="section-heading"><div><p class="eyebrow">REVIEW QUEUE</p><h2>General Knowledge lessons</h2></div>
+            <label>Filter<select id="knowledge-status-filter"><option value="all">All statuses</option><option value="draft">Drafts</option><option value="published">Published</option><option value="rejected">Rejected</option></select></label>
+          </div>
+          <p id="knowledge-queue-status" role="status" aria-live="polite">Loading review queue…</p>
+          <div id="knowledge-queue" class="knowledge-queue"></div>
+          <button type="button" class="secondary" id="knowledge-load-more" hidden>Load more</button>
+        </section>
+      </div>
+    </div>
+    <footer>MINA TEACH AI · Dhaloota beekumsa omishuudha.</footer>
+  </main>
+</body>
+</html>

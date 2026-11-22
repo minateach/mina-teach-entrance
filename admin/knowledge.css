@@ -1,0 +1,20 @@
+.knowledge-admin{width:min(1500px,calc(100% - 32px));margin:24px auto}
+.knowledge-admin-grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(320px,.9fr);gap:16px;align-items:start}
+.knowledge-admin form label{display:grid;gap:6px;margin:12px 0;color:#213b64;font-size:.88rem;font-weight:750}
+.knowledge-admin input,.knowledge-admin select,.knowledge-admin textarea{width:100%;min-width:0;border:1px solid #cad8e9;border-radius:9px;background:#fff;padding:10px;color:#1c2e49;font:inherit}
+.knowledge-admin textarea{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.82rem;line-height:1.5}
+.knowledge-admin .form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.knowledge-queue{display:grid;gap:10px}
+.knowledge-queue-card{padding:14px;border:1px solid #dbe5f1;border-radius:12px;background:#fff}
+.knowledge-queue-card h3{margin:4px 0 8px;color:#17396d;font-size:1rem}
+.knowledge-queue-card p{color:#52657f;line-height:1.55;font-size:.88rem;margin:5px 0}
+.knowledge-review-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.knowledge-review-actions button{border:0;border-radius:8px;background:#1b4f95;color:#fff;padding:8px 11px;font:inherit;font-weight:750;cursor:pointer}
+.knowledge-review-actions button.secondary{background:#edf4ff;color:#204a80;border:1px solid #c5d7ed}
+.knowledge-review-actions button.reject{background:#fff0ef;color:#9c2b26;border:1px solid #f0c4c0}
+.knowledge-status-tag{display:inline-flex;margin-right:5px;padding:4px 8px;border-radius:999px;background:#edf4ff;color:#244b7c;font-size:.76rem;font-weight:800}
+.knowledge-status-tag.draft{background:#fff4d8;color:#815500}
+.knowledge-status-tag.published{background:#e5f7eb;color:#176c37}
+.knowledge-status-tag.rejected{background:#fff0ef;color:#9c2b26}
+@media(max-width:900px){.knowledge-admin-grid{grid-template-columns:1fr}}
+@media(max-width:560px){.knowledge-admin{width:calc(100% - 20px);margin:14px auto}.knowledge-admin .form-grid{grid-template-columns:1fr}.knowledge-review-actions{display:grid;grid-template-columns:1fr}.knowledge-review-actions button{width:100%}}
