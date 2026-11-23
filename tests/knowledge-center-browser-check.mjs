@@ -105,6 +105,7 @@ try {
       privateKnowledgePreferenceWrites.push(payload);
       return { body: { saved: true } };
     }
+    if (url.pathname === "/api/account/data/conversations" && request.method === "PUT") return { body: { saved: true } };
     if (url.pathname === "/api/assistant/status") return {
       body: { provider: "minimax", configured: true, minimaxConfigured: true, geminiConfigured: false },
     };
@@ -145,7 +146,6 @@ try {
   await evaluate('document.getElementById("messageInput").value="Answer without my private notes.";document.getElementById("messageInput").dispatchEvent(new Event("input",{bubbles:true}));document.getElementById("chatForm").requestSubmit()');
   await waitFor('document.querySelectorAll(".message.assistant").length>=2');
   assert.equal(chatRequests[1]?.usePersonalKnowledge, undefined, "the user can turn off private retrieval");
-  console.log("Knowledge preference debug:", await evaluate('JSON.stringify({checked:document.getElementById("privateKnowledgeToggle").checked,disabled:document.getElementById("privateKnowledgeToggle").disabled,saved:localStorage.getItem("mina-teach.assistant.private-knowledge-enabled.v1:user_test_student")})'), privateKnowledgePreferenceWrites.map(write => write.data.privateKnowledgeEnabled));
   await waitForCondition(() => privateKnowledgePreferenceWrites.some(write => write.expectedUserId === "user_test_student" && write.data.privateKnowledgeEnabled === false), "private knowledge opt-out sync");
 
   await command("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
