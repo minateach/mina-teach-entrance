@@ -1,8 +1,9 @@
 import { readFile } from "node:fs/promises";
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
+import multer from "multer";
 import { clerkClient, clerkMiddleware, getAuth } from "@clerk/express";
 import { publishableKeyFromHost } from "@clerk/shared/keys";
 import { ReplitConnectors } from "@replit/connectors-sdk";
@@ -12,7 +13,7 @@ import { createGeneralKnowledgeCenter, GeneralKnowledgeError } from "./server/ge
 import { buildTutorInstructions, resolveFounderResponse } from "./server/assistant-guidance.mjs";
 import { getExamHistory } from "./server/student-analytics.mjs";
 import {materialProblem,materialsProblem} from "./server/lesson-materials.mjs";
-import { normalizeImageDataUrl } from "./server/image-processing.mjs";
+import { normalizeImageBuffer, normalizeImageDataUrl } from "./server/image-processing.mjs";
 import { monthlyImageRequestCap, reserveImageAIRequest, recordSuccessfulImage, utcImageUsageMonth } from "./server/image-usage.mjs";
 import { handleImageStudioRequest } from "./server/image-studio.mjs";
 import {
@@ -38,6 +39,24 @@ import {
   utcMonthStart,
 } from "./server/gemini-grounding.mjs";
 import { CLERK_PROXY_PATH, clerkProxyMiddleware, getClerkProxyHost } from "./server/middlewares/clerkProxyMiddleware.mjs";
+import {
+  PrivateKnowledgeError,
+  deletePrivateDocument,
+  ensurePrivateKnowledgeSchema,
+  exportPrivateDocuments,
+  extractPrivateDocument,
+  listPrivateDocuments,
+  loadSelectedPrivateImage,
+  openPrivateDocument,
+  privateKnowledgeLimits,
+  buildPrivateKnowledgePrompt,
+  privateKnowledgeSources,
+  sharedKnowledgeOwnerId,
+  sharedKnowledgeSources,
+  retrievePrivateKnowledge,
+  savePrivateDocument,
+  updatePrivateDocument,
+} from "./server/private-knowledge.mjs";
 
 const projectRoot = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const founderProfile = JSON.parse(await readFile(resolve(projectRoot, "server/founder-profile.json"), "utf8"));
@@ -98,6 +117,31 @@ function sendJson(response, statusCode, body) {
 
 function sendError(response, statusCode, code, message) {
   sendJson(response, statusCode, { error: { code, message } });
+}
+
+function startResearchEventStream(response) {
+  setSecurityHeaders(response);
+  response.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-store, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  response.flushHeaders?.();
+}
+
+function writeResearchEvent(response, event, payload) {
+  if (response.destroyed || response.writableEnded) return;
+  response.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+}
+
+function finishResearchError(response, statusCode, code, message, streamStarted) {
+  if (streamStarted) {
+    writeResearchEvent(response, "error", { error: { statusCode, code, message } });
+    if (!response.writableEnded) response.end();
+  } else {
+    sendError(response, statusCode, code, message);
+  }
 }
 
 async function readJsonBody(request, bodyLimit = maxBodyBytes) {
@@ -411,6 +455,8 @@ async function handleAssistantChat(request, response) {
     sendError(response, 400, "EMPTY_MESSAGE", "Type a question before sending.");
     return;
   }
+  const researchStreamRequested = input.streamResearch === true &&
+    String(request.headers.accept || "").toLowerCase().includes("text/event-stream");
 
   const founderAnswer = input.imageDataUrl
     ? null
@@ -420,8 +466,87 @@ async function handleAssistantChat(request, response) {
     return;
   }
 
+  const selectedDocumentIds = input.knowledgeDocumentIds ?? [];
+  if (!Array.isArray(selectedDocumentIds)) {
+    sendError(response, 400, "INVALID_DOCUMENT_SELECTION", "Choose private files from the Knowledge Center.");
+    return;
+  }
+  const personalKnowledgeRequested = input.usePersonalKnowledge === true || selectedDocumentIds.length > 0;
+  let personalKnowledgeMatches = [];
+  let selectedKnowledgeImage = null;
+  let personalKnowledgeContext = "";
+  let personalKnowledgeResult;
+  if (personalKnowledgeRequested) {
+    const auth = getAuth(request);
+    if (!auth?.userId) {
+      sendError(response, 401, "KNOWLEDGE_SIGN_IN_REQUIRED", "Sign in before using private Knowledge Center files in an AI answer.");
+      return;
+    }
+    try {
+      personalKnowledgeMatches = await retrievePrivateKnowledge(pool, auth.userId, message, selectedDocumentIds);
+      selectedKnowledgeImage = await loadSelectedPrivateImage(pool, auth.userId, selectedDocumentIds);
+      personalKnowledgeContext = buildPrivateKnowledgePrompt(personalKnowledgeMatches);
+      if (selectedKnowledgeImage) {
+        personalKnowledgeContext = [
+          personalKnowledgeContext,
+          `The user also explicitly selected the private image file ${JSON.stringify(selectedKnowledgeImage.filename)}. Analyze only visible content in that image.`,
+        ].filter(Boolean).join("\n");
+      }
+      const citedMatches = [
+        ...personalKnowledgeMatches,
+        ...(selectedKnowledgeImage ? [{
+          documentId: selectedKnowledgeImage.id,
+          filename: selectedKnowledgeImage.filename,
+          displayName: selectedKnowledgeImage.filename,
+          pageNumber: null,
+        }] : []),
+      ];
+      const sources = privateKnowledgeSources(citedMatches);
+      personalKnowledgeResult = {
+        used: personalKnowledgeMatches.length > 0 || Boolean(selectedKnowledgeImage),
+        sources,
+        notice: sources.length
+          ? "The answer can use the selected private files. Review the file references below."
+          : "No matching text was found in your private files; this answer may rely on general model knowledge.",
+      };
+    } catch (error) {
+      sendPrivateKnowledgeError(response, error, "Your private files could not be retrieved. No AI answer was sent.");
+      return;
+    }
+  }
+  let sharedKnowledgeMatches = [];
+  let sharedKnowledgeContext = "";
+  let sharedKnowledgeInfo = {
+    used: false,
+    sources: [],
+    notice: "No matching approved Knowledge Center material was found; this answer may use general model knowledge.",
+  };
+  try {
+    sharedKnowledgeMatches = await retrievePrivateKnowledge(pool, sharedKnowledgeOwnerId, message);
+    sharedKnowledgeContext = buildPrivateKnowledgePrompt(sharedKnowledgeMatches);
+    const sources = sharedKnowledgeSources(sharedKnowledgeMatches);
+    sharedKnowledgeInfo = {
+      used: sources.length > 0,
+      sources,
+      notice: sources.length
+        ? "This answer may use approved material from the MINA TEACH AI Knowledge Center. Sources are listed below."
+        : "No matching approved Knowledge Center material was found; this answer may use general model knowledge.",
+    };
+  } catch (error) {
+    sendPrivateKnowledgeError(response, error, "The Knowledge Center could not be checked. No AI answer was sent.");
+    return;
+  }
+  const knowledgeContext = [sharedKnowledgeContext, personalKnowledgeContext].filter(Boolean).join("\n\n");
+  const messageWithKnowledge = knowledgeContext
+    ? `${knowledgeContext}\n\nUser question:\n${message}`
+    : message;
+
   let imageInput = null;
   if (input.imageDataUrl !== undefined) {
+    if (selectedKnowledgeImage) {
+      sendError(response, 400, "ONE_IMAGE_AT_A_TIME", "Remove the attached photo or the selected Knowledge Center image, then try again.");
+      return;
+    }
     try {
       imageInput = await normalizeImageDataUrl(input.imageDataUrl);
     } catch (error) {
@@ -431,6 +556,13 @@ async function handleAssistantChat(request, response) {
         error.code || "INVALID_IMAGE",
         error.message || "Choose a valid JPG, PNG, or WEBP image.",
       );
+      return;
+    }
+  } else if (selectedKnowledgeImage) {
+    try {
+      imageInput = await normalizeImageBuffer(selectedKnowledgeImage.buffer, selectedKnowledgeImage.mimeType);
+    } catch (error) {
+      sendError(response, error.statusCode || 400, error.code || "INVALID_IMAGE", error.message || "The selected private image could not be read.");
       return;
     }
   }
@@ -452,7 +584,7 @@ async function handleAssistantChat(request, response) {
         ),
       },
       ...cleanHistory(input.history).map(item => ({ role: item.role, content: item.content })),
-      { role: "user", content: message },
+      { role: "user", content: messageWithKnowledge },
     ];
     try {
       const result = await requestMiniMaxChat(minimaxConnectors, messages, miniMaxChatModel);
@@ -461,11 +593,15 @@ async function handleAssistantChat(request, response) {
         provider: "minimax",
         model: result.model,
         ...(result.usage ? { usage: result.usage } : {}),
+        ...(personalKnowledgeResult ? { privateKnowledge: personalKnowledgeResult } : {}),
+        knowledgeCenter: sharedKnowledgeInfo,
         webResearch: {
           searched: false,
           sourceCount: 0,
           sources: [],
-          notice: "No web search was performed; this answer is from general model knowledge.",
+          notice: sharedKnowledgeInfo.used
+            ? "No web search was performed; Knowledge Center references are shown separately."
+            : "No web search was performed; this answer is from general model knowledge.",
         },
       });
     } catch (error) {
@@ -482,7 +618,7 @@ async function handleAssistantChat(request, response) {
             apiKey: process.env.GEMINI_API_KEY.trim(),
             grade,
             language,
-            message,
+            message: messageWithKnowledge,
             history: input.history,
             studentMemory,
           });
@@ -494,8 +630,12 @@ async function handleAssistantChat(request, response) {
               searched: false,
               sourceCount: 0,
               sources: [],
-              notice: "No web search was performed; Gemini provided this fallback answer from model knowledge.",
+              notice: sharedKnowledgeInfo.used
+                ? "No web search was performed; Knowledge Center references are shown separately."
+                : "No web search was performed; Gemini provided this fallback answer from model knowledge.",
             },
+            ...(personalKnowledgeResult ? { privateKnowledge: personalKnowledgeResult } : {}),
+            knowledgeCenter: sharedKnowledgeInfo,
           });
           return;
         } catch (fallbackError) {
@@ -577,12 +717,21 @@ async function handleAssistantChat(request, response) {
     {
       role: "user",
       parts: [
-        { text: message },
+         { text: messageWithKnowledge },
         ...(imageInput ? [{ inline_data: { mime_type: imageInput.mimeType, data: imageInput.data } }] : []),
       ],
     },
   ];
   const model = geminiModel;
+  let researchStreamStarted = false;
+  if (researchStreamRequested && groundingEnabled) {
+    startResearchEventStream(response);
+    researchStreamStarted = true;
+    writeResearchEvent(response, "status", {
+      state: "searching",
+      message: "Search the Web · checking current public sources",
+    });
+  }
   try {
     const providerResponse = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
@@ -621,17 +770,18 @@ async function handleAssistantChat(request, response) {
         model,
       });
       const failure = normalizeGeminiError(providerResponse, providerBody, groundingEnabled);
-      sendError(response, failure.statusCode, failure.code, failure.message);
+      finishResearchError(response, failure.statusCode, failure.code, failure.message, researchStreamStarted);
       return;
     }
 
     const blockReason = providerBody?.promptFeedback?.blockReason;
     if (blockReason) {
-      sendError(
+      finishResearchError(
         response,
         422,
         "GEMINI_PROMPT_BLOCKED",
         "Gemini could not answer this prompt under its safety rules. Try rephrasing the question.",
+        researchStreamStarted,
       );
       return;
     }
@@ -639,11 +789,12 @@ async function handleAssistantChat(request, response) {
     const grounded = parseGeminiGrounding(providerBody);
     const answer = grounded.answer || getGeminiAnswerText(providerBody);
     if (!answer) {
-      sendError(
+      finishResearchError(
         response,
         502,
         "EMPTY_GEMINI_RESPONSE",
         "Gemini returned no answer. Please try asking in a different way.",
+        researchStreamStarted,
       );
       return;
     }
@@ -669,7 +820,7 @@ async function handleAssistantChat(request, response) {
           totalTokens: Number(providerBody.usageMetadata.totalTokenCount) || 0,
         }
       : null;
-    sendJson(response, 200, {
+    const answerPayload = {
       answer,
       provider: "gemini",
       imageAnalyzed: Boolean(imageInput),
@@ -684,26 +835,38 @@ async function handleAssistantChat(request, response) {
             : "A web search ran, but no usable source citations were returned."
           : imageInput
             ? "The uploaded image was sent for analysis. No web search was performed."
-            : searchNotice || "No web search was performed; this answer is from general model knowledge.",
+            : sharedKnowledgeInfo.used
+              ? "No web search was performed; Knowledge Center references are shown separately."
+              : searchNotice || "No web search was performed; this answer is from general model knowledge.",
       },
-    });
+      ...(personalKnowledgeResult ? { privateKnowledge: personalKnowledgeResult } : {}),
+      knowledgeCenter: sharedKnowledgeInfo,
+    };
+    if (researchStreamStarted) {
+      writeResearchEvent(response, "result", answerPayload);
+      if (!response.writableEnded) response.end();
+    } else {
+      sendJson(response, 200, answerPayload);
+    }
   } catch (error) {
     if (error?.name === "TimeoutError" || error?.name === "AbortError") {
-      sendError(
+      finishResearchError(
         response,
         504,
         "TUTOR_TIMEOUT",
         "Gemini did not respond before the request timed out. No answer was generated; you can retry later.",
+        researchStreamStarted,
       );
       return;
     }
 
     console.error("[assistant] Gemini request failed.", { name: error?.name || "Error" });
-    sendError(
+    finishResearchError(
       response,
       502,
       "TUTOR_UNAVAILABLE",
       "Gemini could not connect right now. Please try again shortly.",
+      researchStreamStarted,
     );
   }
 }
@@ -764,6 +927,11 @@ function publicFilePath(pathname) {
   if (pathname === "/assistant" || pathname === "/assistant/") {
     return "assistant/index.html";
   }
+  if (pathname === "/knowledge" || pathname === "/knowledge/") return "knowledge/index.html";
+  if (new Set(["/knowledge/app.js", "/knowledge/styles.css"]).has(pathname)) return pathname.slice(1);
+  if (pathname === "/knowledge/templates/knowledge-record-template.jsonl") {
+    return "knowledge/templates/knowledge-record-template.jsonl";
+  }
   if (pathname === "/image-studio" || pathname === "/image-studio/") {
     return "image-studio/index.html";
   }
@@ -786,6 +954,7 @@ function publicFilePath(pathname) {
   const allowedTopLevelFiles = new Set(["/Index.html", "/Index.HTml"]);
   if (allowedTopLevelFiles.has(pathname)) return pathname.slice(1);
   if (pathname.startsWith("/assistant/")) return pathname.slice(1);
+  if (pathname.startsWith("/knowledge/")) return pathname.slice(1);
   if (pathname.startsWith("/image-studio/")) return pathname.slice(1);
   if (new Set(["/learning/app.js", "/learning/styles.css", "/learning/library.css", "/learning/analytics.css", "/learning/analytics.js", "/learning/notifications.css", "/learning/study-notifications.js", "/learning/history-grade10.js", "/learning/dashboard.js", "/learning/learning-state.js", "/learning/lesson-view.js", "/learning/material-reader.js", "/learning/offline-store.js", "/learning/coverage.html", "/learning/coverage.js", "/learning/knowledge.html", "/learning/knowledge.js", "/learning/knowledge.css"]).has(pathname)) {
     return pathname.slice(1);
@@ -813,8 +982,10 @@ async function serveStatic(pathname, request, response) {
       ".html": "text/html; charset=utf-8",
       ".htm": "text/html; charset=utf-8",
       ".js": "text/javascript; charset=utf-8",
+      ".mjs": "text/javascript; charset=utf-8",
       ".svg": "image/svg+xml",
       ".webmanifest": "application/manifest+json; charset=utf-8",
+      ".jsonl": "application/x-ndjson; charset=utf-8",
       ".png": "image/png",
       ".jpg": "image/jpeg",
       ".webp": "image/webp",
@@ -939,6 +1110,10 @@ async function getAccountRecords(userId) {
 }
 
 const app = express();
+const privateDocumentUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: privateKnowledgeLimits.fileBytes, files: 1, fields: 0, parts: 1 },
+});
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 app.use(clerkMiddleware(request => ({
   publishableKey: publishableKeyFromHost(getClerkProxyHost(request) || "", process.env.CLERK_PUBLISHABLE_KEY),
@@ -966,6 +1141,189 @@ app.get("/api/account/status", async (request, response) => {
     const result = await pool.query("SELECT role FROM mina_user_roles WHERE user_id=$1", [userId]);
     sendJson(response, 200, { signedIn: true, userId, role: result.rows[0]?.role || "student" });
   } catch { sendError(response,503,"ACCOUNT_STATUS_FAILED","Account storage is temporarily unavailable. Please retry."); }
+});
+
+function sendPrivateKnowledgeError(response, error, fallback = "The private Knowledge Center is temporarily unavailable.") {
+  const statusCode = Number(error?.statusCode) || 503;
+  const code = error?.code || "KNOWLEDGE_STORAGE_UNAVAILABLE";
+  if (!error?.statusCode) console.error("[knowledge] Private document operation failed.", { name: error?.name || "Error" });
+  sendError(response, statusCode, code, error?.message || fallback);
+}
+
+function requireSameOrigin(request, response) {
+  if (isSameOrigin(request)) return true;
+  sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed.");
+  return false;
+}
+
+app.get("/api/knowledge/documents", requireAuth, async (request, response) => {
+  try {
+    const result = await listPrivateDocuments(pool, request.userId, request.query.q || "");
+    sendJson(response, 200, result);
+  } catch (error) {
+    sendPrivateKnowledgeError(response, error);
+  }
+});
+
+app.post("/api/knowledge/documents", requireAuth, (request, response, next) => {
+  if (!requireSameOrigin(request, response)) return;
+  privateDocumentUpload.single("file")(request, response, error => {
+    if (!error) return next();
+    if (error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE") {
+      sendError(response, 413, "FILE_SIZE_LIMIT", "Each file must be no larger than 8 MB.");
+      return;
+    }
+    sendError(response, 400, "UPLOAD_FAILED", "The file upload could not be read. Try again with one file.");
+  });
+}, async (request, response) => {
+  if (!request.file) {
+    sendError(response, 400, "FILE_REQUIRED", "Choose a file to upload.");
+    return;
+  }
+  try {
+    const extracted = await extractPrivateDocument({
+      filename: request.file.originalname,
+      buffer: request.file.buffer,
+    });
+    const saved = await savePrivateDocument(pool, request.userId, {
+      ...extracted,
+      id: randomUUID(),
+      sha256: createHash("sha256").update(extracted.buffer).digest("hex"),
+    });
+    sendJson(response, saved.duplicate ? 200 : 201, saved);
+  } catch (error) {
+    sendPrivateKnowledgeError(response, error, "The file could not be processed.");
+  }
+});
+
+app.patch("/api/knowledge/documents/:id", requireAuth, async (request, response) => {
+  if (!requireSameOrigin(request, response)) return;
+  try {
+    const input = await readJsonBody(request, 8_000);
+    sendJson(response, 200, { document: await updatePrivateDocument(pool, request.userId, request.params.id, input) });
+  } catch (error) {
+    sendPrivateKnowledgeError(response, error, "The file could not be updated.");
+  }
+});
+
+app.delete("/api/knowledge/documents/:id", requireAuth, async (request, response) => {
+  if (!requireSameOrigin(request, response)) return;
+  try {
+    await deletePrivateDocument(pool, request.userId, request.params.id);
+    sendJson(response, 200, { deleted: true });
+  } catch (error) {
+    sendPrivateKnowledgeError(response, error, "The file could not be deleted.");
+  }
+});
+
+app.get("/api/knowledge/documents/:id/file", requireAuth, async (request, response) => {
+  try {
+    const file = await openPrivateDocument(pool, request.userId, request.params.id);
+    const fallbackFilename = file.filename.replace(/["\\\r\n]/g, "_").replace(/[^\x20-\x7e]/g, "_").slice(0, 150);
+    const encodedFilename = encodeURIComponent(file.filename).replace(/['()]/g, value => `%${value.charCodeAt(0).toString(16)}`);
+    const previewable = ["application/pdf", "image/jpeg", "image/png", "image/webp", "text/plain", "text/markdown", "text/csv"].includes(file.mimeType);
+    setSecurityHeaders(response);
+    response.writeHead(200, {
+      "Content-Type": file.mimeType,
+      "Content-Length": file.byteSize,
+      "Content-Disposition": `${previewable ? "inline" : "attachment"}; filename="${fallbackFilename}"; filename*=UTF-8''${encodedFilename}`,
+      "Cache-Control": "private, no-store",
+      "X-Content-Type-Options": "nosniff",
+    });
+    response.end(file.buffer);
+  } catch (error) {
+    sendPrivateKnowledgeError(response, error, "The file could not be opened.");
+  }
+});
+
+app.get("/api/knowledge/export", requireAuth, async (request, response) => {
+  try {
+    const documents = await exportPrivateDocuments(pool, request.userId);
+    sendJson(response, 200, { exportedAt: new Date().toISOString(), documents });
+  } catch (error) {
+    sendPrivateKnowledgeError(response, error, "Your private Knowledge Center data could not be exported.");
+  }
+});
+
+app.get("/api/knowledge/shared/documents", requireAuth, requireRole("admin"), async (request, response) => {
+  try {
+    sendJson(response, 200, await listPrivateDocuments(pool, sharedKnowledgeOwnerId, request.query.q || ""));
+  } catch (error) {
+    sendPrivateKnowledgeError(response, error, "The shared Knowledge Center could not be loaded.");
+  }
+});
+
+app.post("/api/knowledge/shared/documents", requireAuth, requireRole("admin"), (request, response, next) => {
+  if (!requireSameOrigin(request, response)) return;
+  privateDocumentUpload.single("file")(request, response, error => {
+    if (!error) return next();
+    if (error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE") {
+      sendError(response, 413, "FILE_SIZE_LIMIT", "Each file must be no larger than 8 MB.");
+      return;
+    }
+    sendError(response, 400, "UPLOAD_FAILED", "The file upload could not be read. Try again with one file.");
+  });
+}, async (request, response) => {
+  if (!request.file) {
+    sendError(response, 400, "FILE_REQUIRED", "Choose a file to upload.");
+    return;
+  }
+  try {
+    const extracted = await extractPrivateDocument({
+      filename: request.file.originalname,
+      buffer: request.file.buffer,
+    });
+    const saved = await savePrivateDocument(pool, sharedKnowledgeOwnerId, {
+      ...extracted,
+      id: randomUUID(),
+      sha256: createHash("sha256").update(extracted.buffer).digest("hex"),
+    });
+    sendJson(response, saved.duplicate ? 200 : 201, saved);
+  } catch (error) {
+    sendPrivateKnowledgeError(response, error, "The file could not be processed.");
+  }
+});
+
+app.patch("/api/knowledge/shared/documents/:id", requireAuth, requireRole("admin"), async (request, response) => {
+  if (!requireSameOrigin(request, response)) return;
+  try {
+    const input = await readJsonBody(request, 8_000);
+    sendJson(response, 200, {
+      document: await updatePrivateDocument(pool, sharedKnowledgeOwnerId, request.params.id, input),
+    });
+  } catch (error) {
+    sendPrivateKnowledgeError(response, error, "The shared file could not be updated.");
+  }
+});
+
+app.delete("/api/knowledge/shared/documents/:id", requireAuth, requireRole("admin"), async (request, response) => {
+  if (!requireSameOrigin(request, response)) return;
+  try {
+    await deletePrivateDocument(pool, sharedKnowledgeOwnerId, request.params.id);
+    sendJson(response, 200, { deleted: true });
+  } catch (error) {
+    sendPrivateKnowledgeError(response, error, "The shared file could not be deleted.");
+  }
+});
+
+app.get("/api/knowledge/shared/documents/:id/file", requireAuth, requireRole("admin"), async (request, response) => {
+  try {
+    const file = await openPrivateDocument(pool, sharedKnowledgeOwnerId, request.params.id);
+    const fallbackFilename = file.filename.replace(/["\\\r\n]/g, "_").replace(/[^\x20-\x7e]/g, "_").slice(0, 150);
+    const encodedFilename = encodeURIComponent(file.filename).replace(/['()]/g, value => `%${value.charCodeAt(0).toString(16)}`);
+    const previewable = ["application/pdf", "image/jpeg", "image/png", "image/webp", "text/plain", "text/markdown", "text/csv", "application/x-ndjson"].includes(file.mimeType);
+    setSecurityHeaders(response);
+    response.writeHead(200, {
+      "Content-Type": file.mimeType,
+      "Content-Length": file.byteSize,
+      "Content-Disposition": `${previewable ? "inline" : "attachment"}; filename="${fallbackFilename}"; filename*=UTF-8''${encodedFilename}`,
+      "Cache-Control": "private, no-store",
+      "X-Content-Type-Options": "nosniff",
+    });
+    response.end(file.buffer);
+  } catch (error) {
+    sendPrivateKnowledgeError(response, error, "The shared source file could not be opened.");
+  }
 });
 
 app.get("/api/educator/access", requireAuth, requireRole("teacher", "question_reviewer", "educator", "admin"), (_request, response) => {
@@ -1091,11 +1449,20 @@ app.delete("/api/account/data", requireAuth, async (request, response) => {
     sendError(response, 403, "CROSS_ORIGIN_BLOCKED", "This request is not allowed.");
     return;
   }
+  let client;
   try {
-    await pool.query("DELETE FROM mina_user_records WHERE user_id = $1", [request.userId]);
+    await ensurePrivateKnowledgeSchema(pool);
+    client = await pool.connect();
+    await client.query("BEGIN");
+    await client.query("DELETE FROM mina_private_documents WHERE user_id=$1", [request.userId]);
+    await client.query("DELETE FROM mina_user_records WHERE user_id = $1", [request.userId]);
+    await client.query("COMMIT");
     sendJson(response, 200, { deleted: true });
   } catch {
+    if (client) await client.query("ROLLBACK").catch(() => {});
     sendError(response, 500, "ACCOUNT_STORAGE_ERROR", "Your saved data could not be deleted.");
+  } finally {
+    client?.release();
   }
 });
 

@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#102d5f">
+  <meta name="description" content="A private, searchable library for your Mina Teach AI files and learning notes.">
+  <link rel="icon" href="/images/mina-teach-ai-favicon.png" type="image/png">
+  <link rel="stylesheet" href="/knowledge/styles.css">
+  <script type="module" src="/knowledge/app.js"></script>
+  <title>AI Knowledge &amp; Memory Center | MINA TEACH AI</title>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="MINA TEACH AI home">
+      <img src="/images/0_1000107983_1794514022860.png" alt="" width="52" height="52">
+      <span><strong>MINA TEACH AI</strong><small>Dhaloota beekumsa omishuudha.</small></span>
+    </a>
+    <nav aria-label="Main navigation">
+      <a href="/assistant/">AI Assistant</a>
+      <a href="/learning/">Learning</a>
+      <a href="/account/">Account</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <p class="eyebrow">YOUR PRIVATE LEARNING SPACE</p>
+      <h1>AI Knowledge &amp; Memory Center</h1>
+      <p>Keep personal documents private, or—if you are an administrator—add reviewed source files and structured lessons to the shared AI knowledge library.</p>
+      <div class="privacy-chip"><span aria-hidden="true">●</span> Private to your signed-in account</div>
+    </section>
+
+    <div id="account-notice" class="notice" role="status">Checking your account…</div>
+    <section class="layout">
+      <div class="primary-column">
+        <section class="panel upload-panel" aria-labelledby="upload-title">
+          <div class="panel-heading">
+            <div><p class="eyebrow">ADD TO YOUR LIBRARY</p><h2 id="upload-title">Upload a file</h2></div>
+            <span class="upload-icon" aria-hidden="true">↑</span>
+          </div>
+          <p class="muted">Supported files: PDF, DOC, DOCX, TXT, Markdown, CSV, JSONL, JPG, PNG, and WEBP.</p>
+          <form id="upload-form">
+            <label class="dropzone" for="file-input">
+              <span class="drop-icon" aria-hidden="true">＋</span>
+              <strong>Choose a file from your device</strong>
+              <span>Up to 8 MB per file · 20 MB total</span>
+            </label>
+            <input id="file-input" type="file" accept=".pdf,.doc,.docx,.txt,.md,.csv,.jsonl,.jpg,.jpeg,.png,.webp,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,image/jpeg,image/png,image/webp,application/x-ndjson">
+            <button class="primary-button" id="upload-button" type="submit" disabled>Upload and process</button>
+          </form>
+          <p id="upload-status" class="form-status" role="status"></p>
+          <p class="small-print">Text extraction happens on the app server. Files are not sent to an AI provider during upload. Images are sent to Gemini only if you select them for an AI chat; the existing vision request limit and provider costs apply.</p>
+        </section>
+
+        <section class="panel library-panel" aria-labelledby="library-title">
+          <div class="panel-heading library-heading">
+            <div><p class="eyebrow">YOUR FILES</p><h2 id="library-title">My Knowledge Library</h2></div>
+            <div id="storage-usage" class="storage-usage">0 files</div>
+          </div>
+          <div class="library-tools">
+            <label class="search-box"><span class="sr-only">Search your files</span><span aria-hidden="true">⌕</span><input id="search-input" type="search" placeholder="Search names or document text"></label>
+            <label class="category-filter">Category
+              <select id="category-filter"><option value="">All categories</option></select>
+            </label>
+          </div>
+          <div id="library-status" class="library-status" role="status">Sign in to view your private files.</div>
+          <ul id="document-list" class="document-list" aria-label="Your uploaded files"></ul>
+        </section>
+
+        <section class="panel shared-panel" id="shared-admin-panel" aria-labelledby="shared-title" hidden>
+          <div class="panel-heading library-heading">
+            <div><p class="eyebrow">ADMIN-ONLY · STUDENT RETRIEVAL ENABLED</p><h2 id="shared-title">Shared AI Knowledge Library</h2></div>
+            <div id="shared-storage-usage" class="storage-usage">0 files</div>
+          </div>
+          <p class="muted">Only administrators can upload, search, open, rename, or delete these originals. The Assistant can retrieve relevant indexed passages for learners and show the document title and source page.</p>
+          <form id="shared-upload-form">
+            <label class="dropzone" for="shared-file-input">
+              <span class="drop-icon" aria-hidden="true">＋</span>
+              <strong>Choose a source file or JSONL knowledge file</strong>
+              <span>Up to 8 MB per file · shared library limit 20 MB</span>
+            </label>
+            <input id="shared-file-input" type="file" accept=".pdf,.doc,.docx,.txt,.md,.csv,.jsonl,.jpg,.jpeg,.png,.webp">
+            <button class="primary-button" id="shared-upload-button" type="submit" disabled>Process into shared library</button>
+          </form>
+          <p class="small-print">Upload processing is local to this app server; files are not sent to an AI provider during upload. Extracted passages may be sent with a learner’s question when the Assistant uses them. Scanned pages and embedded image/chart content are not OCR-indexed.</p>
+          <p id="shared-upload-status" class="form-status" role="status"></p>
+          <div class="library-tools shared-tools">
+            <label class="search-box"><span class="sr-only">Search shared sources</span><span aria-hidden="true">⌕</span><input id="shared-search-input" type="search" placeholder="Search title, topic, question, or content"></label>
+            <a class="small-button template-link" href="/knowledge/templates/knowledge-record-template.jsonl" download>JSONL template</a>
+          </div>
+          <p class="small-print">The JSONL template is a schema example, not lesson content. Fill each record with verified material before uploading. Every line must be one complete JSON object.</p>
+          <div id="shared-library-status" class="library-status" role="status">Administrator access required.</div>
+          <ul id="shared-document-list" class="document-list" aria-label="Shared source files"></ul>
+        </section>
+      </div>
+
+      <aside class="secondary-column">
+        <section class="panel ai-panel">
+          <div class="panel-heading"><div><p class="eyebrow">USE YOUR SOURCES</p><h2>Ask Mina about your files</h2></div></div>
+          <p class="muted">Approved shared sources are checked automatically when relevant. Answers identify Knowledge Center documents and page numbers when indexed passages support the response. Your private uploads remain private to your account.</p>
+          <a class="primary-link" href="/assistant/?knowledge=1">Open AI Assistant</a>
+          <p class="small-print">When enabled, relevant text excerpts are sent with your question to the configured AI provider. Do not upload passwords or sensitive personal records.</p>
+        </section>
+        <section class="panel memory-panel">
+          <div class="memory-mark" aria-hidden="true">✦</div>
+          <p class="eyebrow">SEPARATE AND USER-CONTROLLED</p>
+          <h2>My AI Memory</h2>
+          <p class="muted">Manage the saved notes you explicitly add. You can review, edit, remove, and choose whether Mina uses them in answers.</p>
+          <a class="secondary-link" href="/assistant/?memory=1">Review my saved memories</a>
+        </section>
+        <section class="panel storage-panel">
+          <h2>File processing</h2>
+          <ul>
+            <li>Readable text is extracted page by page; the original file remains available to its owner.</li>
+            <li>Scanned PDFs and image-only text are not OCR-indexed; the page is marked accordingly.</li>
+            <li>PDF embedded images, diagrams, and chart pixels are not automatically interpreted.</li>
+            <li>Exact duplicate files are detected by checksum and are not stored twice.</li>
+            <li>Deleting a file also removes its searchable passages.</li>
+          </ul>
+          <a href="/privacy/">Read the Privacy Policy</a>
+        </section>
+      </aside>
+    </section>
+  </main>
+  <footer>MINA TEACH AI · <a href="/privacy/">Privacy</a> · <a href="/terms/">Terms</a></footer>
+</body>
+</html>

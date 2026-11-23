@@ -27,6 +27,7 @@
         <div class="topbar-right">
           <p class="mission" lang="om">Dhaloota beekumsa omishuudha.</p>
           <a class="home-link" href="/account/">Account</a>
+          <a class="home-link" href="/knowledge/">Knowledge Center</a>
           <a class="home-link" href="/image-studio/">Image Studio</a>
           <a class="home-link" href="/">Home</a>
         </div>
@@ -54,7 +55,7 @@
           </button>
           <section class="memory-panel" id="memoryPanel" aria-label="Student-controlled study memory" hidden>
             <h2>My study memory</h2>
-            <p class="memory-description">Only notes you add are saved. Choose whether Mina may use them in answers. Avoid passwords or sensitive details.</p>
+            <p class="memory-description">Only notes you add are saved. Choose whether Mina may use them in answers. They personalize replies; they do not retrain the AI. Avoid passwords or sensitive details.</p>
             <label class="memory-consent">
               <input id="memoryEnabled" type="checkbox">
               <span>Use my saved notes in answers</span>
@@ -125,6 +126,13 @@
                 </div>
                 <p class="storage-note" id="storageNote">Sessions are saved only in this browser.</p>
               </div>
+              <div class="private-knowledge-choice">
+                <label class="private-knowledge-toggle" for="privateKnowledgeToggle">
+                  <input id="privateKnowledgeToggle" type="checkbox">
+                  <span>Teach from my private Knowledge Center files</span>
+                </label>
+                <p id="privateKnowledgeStatus" role="status">On for signed-in accounts by default: relevant passages may be sent with questions. This does not train the AI model; turn it off anytime. Approved shared sources are checked automatically.</p>
+              </div>
 
               <form class="composer" id="chatForm">
                 <label class="sr-only" for="messageInput">Your question for Mina Teach</label>
@@ -152,6 +160,7 @@
                 <span>Enter to send · Shift + Enter for a new line</span>
                 <span>General chat uses MiniMax. Current web research and image analysis use Gemini when available; web search is capped at 100 app requests per month and may incur Google API charges.</span>
               </div>
+              <p class="knowledge-source-note">Relevant approved Knowledge Center passages are checked automatically. When found, source titles and page references appear below the answer; uploaded files are not used to train the model.</p>
               <p class="image-retention-note">Images stay in this browser and are sent to Gemini only when you submit them. Gemini vision is capped at 20 app requests per UTC month and is billed by input tokens. Synced chats on another device need the image re-uploaded.</p>
             </div>
           </div>

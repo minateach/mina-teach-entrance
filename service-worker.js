@@ -1,4 +1,4 @@
-const CACHE_NAME = "mina-teach-shell-v10";
+const CACHE_NAME = "mina-teach-shell-v12";
 const SHELL = [
   "/offline.html",
   "/",
@@ -26,6 +26,10 @@ const SHELL = [
   "/assistant/app.js",
   "/assistant/offline-ai-provider.js",
   "/assistant/image-store.js",
+  "/assistant/research-response.mjs",
+  "/knowledge/",
+  "/knowledge/app.js",
+  "/knowledge/styles.css",
   "/image-studio/",
   "/image-studio/styles.css",
   "/image-studio/app.js",
@@ -102,7 +106,7 @@ self.addEventListener("fetch", event => {
 
   if (request.destination === "script" || request.destination === "style" ||
       request.destination === "image" || request.destination === "font" ||
-      /\.(?:js|css|svg|png|jpe?g|webp|woff2?)$/i.test(url.pathname)) {
+      /\.(?:js|mjs|css|svg|png|jpe?g|webp|woff2?)$/i.test(url.pathname)) {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE_NAME);
       const cached = await cache.match(request);

@@ -49,6 +49,8 @@ test("tutor guidance is respectful, balanced, and factual in every supported rep
     assert.match(instructions, /explicit translation requests across English, Afaan Oromoo, and Amharic/i);
     assert.match(instructions, /interpretation/i);
     assert.match(instructions, /state uncertainty/i);
+    assert.match(instructions, /Check calculations, definitions, and conclusions for internal consistency/i);
+    assert.match(instructions, /not private hidden chain-of-thought/i);
     assert.match(instructions, /do not claim to browse, search, or cite current sources/i);
   }
 });
@@ -56,6 +58,10 @@ test("tutor guidance is respectful, balanced, and factual in every supported rep
 test("grounded research and consented study memory remain explicitly bounded", () => {
   const withoutMemory = buildTutorInstructions("en", 11, true, "", false, [], founderProfile);
   assert.match(withoutMemory, /Google Search grounding is available/);
+  assert.match(withoutMemory, /official Ethiopian Ministry of Education/);
+  assert.match(withoutMemory, /compare at least two independent reputable sources/);
+  assert.match(withoutMemory, /publication dates actually returned by the tool/);
+  assert.match(withoutMemory, /meaningful disagreement or limits/);
   assert.doesNotMatch(withoutMemory, /explicitly chose to share these study preferences/);
 
   const withMemory = buildTutorInstructions("om", 11, false, "No search.", false, ["Show each algebra step"], founderProfile);
@@ -63,4 +69,5 @@ test("grounded research and consented study memory remain explicitly bounded", (
   assert.match(withMemory, /explicitly chose to share these study preferences for this answer/);
   assert.match(withMemory, /Show each algebra step/);
   assert.match(withMemory, /Treat them as limited preferences only/);
+  assert.match(withMemory, /Do not infer or save new memories from this conversation/);
 });

@@ -76,6 +76,8 @@ test("empty or retired model responses are not represented as answers", async ()
 test("current-source and image requests use Gemini; ordinary multilingual text uses MiniMax", () => {
   assert.equal(shouldUseGeminiForRequest("What is the latest exchange rate?"), true);
   assert.equal(shouldUseGeminiForRequest("What is the current policy?"), true);
+  assert.equal(shouldUseGeminiForRequest("Who is Ethiopia's prime minister now?"), true);
+  assert.equal(shouldUseGeminiForRequest("What changed in the latest admissions guidance?"), true);
   assert.equal(shouldUseGeminiForRequest("Explain electric current in a wire."), false);
   assert.equal(shouldUseGeminiForRequest("Har'a odeeffannoo haaraa maal jira?"), true);
   assert.equal(shouldUseGeminiForRequest("የዛሬ ዜና ምንድነው?"), true);
@@ -97,4 +99,12 @@ test("saved memory is size-limited and contains only explicit text notes", () =>
   assert.equal(memory[1].length, 240);
   assert.equal(memory[2], "Prefer short examples");
   assert.equal(normalizeStudentMemory("not a list").length, 0);
+});
+
+test("server memory limits match the twenty editable notes offered by the assistant", () => {
+  const notes = Array.from({ length: 22 }, (_, index) => `Preference ${index + 1}`);
+  const normalized = normalizeStudentMemory(notes);
+  assert.equal(normalized.length, 20);
+  assert.equal(normalized.at(-1), "Preference 20");
+  assert.equal(normalizeStudentMemory(["x".repeat(240).repeat(21)]).length, 1);
 });

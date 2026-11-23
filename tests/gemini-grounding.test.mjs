@@ -15,7 +15,7 @@ test("grounding parser returns real answer and HTTPS citations only", () => {
       groundingMetadata: {
         webSearchQueries: ["latest official update", ""],
         groundingChunks: [
-          { web: { uri: "https://example.edu/report", title: "Official report" } },
+          { web: { uri: "https://example.edu/report", title: "Official report", publishedDate: "2025-07-12", snippet: "A provider-returned source excerpt." } },
           { web: { uri: "javascript:alert(1)", title: "Unsafe" } },
           { web: { uri: "http://example.edu/insecure", title: "Insecure" } },
           { web: { uri: "https://example.edu/report", title: "Duplicate" } },
@@ -26,7 +26,31 @@ test("grounding parser returns real answer and HTTPS citations only", () => {
   assert.equal(result.answer, "Recent answer.");
   assert.equal(result.searchedWeb, true);
   assert.equal(result.searchQueryCount, 1);
-  assert.deepEqual(result.sources, [{ title: "Official report", url: "https://example.edu/report" }]);
+  assert.deepEqual(result.sources, [{
+    title: "Official report",
+    url: "https://example.edu/report",
+    publicationDate: "2025-07-12",
+    snippet: "A provider-returned source excerpt.",
+  }]);
+});
+
+test("source metadata keeps only provider-supplied valid dates and text", () => {
+  const result = parseGeminiGrounding({
+    candidates: [{
+      content: { parts: [{ text: "A grounded answer." }] },
+      groundingMetadata: {
+        groundingChunks: [
+          { web: { uri: "https://example.edu/a", title: "Source A", date: "2025-13-40", snippet: 42 } },
+          { web: { uri: "https://example.edu/b", title: "Source B", publicationDate: "2024" } },
+        ],
+      },
+    }],
+  });
+  assert.equal(result.searchedWeb, true);
+  assert.deepEqual(result.sources, [
+    { title: "Source A", url: "https://example.edu/a" },
+    { title: "Source B", url: "https://example.edu/b", publicationDate: "2024" },
+  ]);
 });
 
 test("no grounding metadata is reported as not searched", () => {

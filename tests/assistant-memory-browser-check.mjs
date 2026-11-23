@@ -176,6 +176,14 @@ try {
   assert.ok(writes.preferences.every(write => write.owner === "user_A" && write.data.assistantMemory), "memory updates are sent only to the active account");
   assert.ok(writes.conversations.some(write => write.owner === "user_A" && write.data.some(item => item.title.includes("English algebra"))), "conversation updates are account-scoped");
 
+   await evaluate('window.__copiedAnswer="";Object.defineProperty(navigator,"clipboard",{configurable:true,value:{writeText:async(text)=>{window.__copiedAnswer=text}}});document.querySelector(".message.assistant:last-of-type .message-actions button").click()');
+   await waitFor('window.__copiedAnswer.includes("I will translate")');
+   await evaluate('document.querySelector(".message.assistant:last-of-type .message-actions button[aria-label*=Regenerate]").click()');
+   await waitForCondition(() => chatRequests.length >= 5, "answer regeneration request");
+   await waitFor('document.querySelectorAll(".message.assistant").length===1');
+   assert.equal(chatRequests[4].message, chatRequests[3].message, "regeneration resends the original user prompt");
+   assert.ok(!chatRequests[4].history.some(message => message.content === chatRequests[4].message), "regeneration does not duplicate the user prompt in context");
+
   currentUser = "user_B";
   await evaluate('window.dispatchEvent(new Event("focus"))');
   await waitFor('document.querySelector(".history-item")?.textContent.includes("Private history for learner B") && !document.querySelector("#historyList").textContent.includes("Private history for learner A")');
@@ -185,7 +193,7 @@ try {
   assert.match(scopedStorage, /Private history for learner A|English algebra/);
   assert.match(scopedStorage, /Private history for learner B/);
   assert.deepEqual(browser.exceptions, []);
-  console.log("PASS: account-scoped chat history, user-added/editable/removable memory, opt-in memory forwarding, English-to-Afaan Oromoo request settings, explicit MiniMax failure, no fabricated response, and Android-width layout.");
+   console.log("PASS: account-scoped chat history, user-controlled memory, copy/regenerate controls, correct regeneration context, multilingual request settings, explicit provider failures, and Android-width layout.");
 } finally {
   await browser.close();
 }

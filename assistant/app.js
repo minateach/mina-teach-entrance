@@ -1,8 +1,10 @@
 import { getLocalImage, saveLocalImage } from "./image-store.js";
 import { hasOfflineTutor, generateOfflineTutorAnswer } from "./offline-ai-provider.js";
+import { readAssistantResearchResponse } from "./research-response.mjs";
 
 const STORAGE_KEY = "mina-teach.assistant.conversations.v1";
 const MEMORY_STORAGE_KEY = "mina-teach.assistant.memory.v1";
+const PRIVATE_KNOWLEDGE_STORAGE_KEY = "mina-teach.assistant.private-knowledge-enabled.v1";
 let storageAvailable = true;
 
 const elements = {
@@ -38,6 +40,8 @@ const elements = {
   memoryStatus: document.getElementById("memoryStatus"),
   memoryList: document.getElementById("memoryList"),
   storageNote: document.getElementById("storageNote"),
+  privateKnowledgeToggle: document.getElementById("privateKnowledgeToggle"),
+  privateKnowledgeStatus: document.getElementById("privateKnowledgeStatus"),
 };
 
 let conversations = [];
@@ -52,10 +56,12 @@ let accountOwner = "guest";
 let accountPreferences = {};
 let studentMemory = [];
 let memoryEnabled = false;
+let privateKnowledgeEnabled = false;
 let memoryEditingId = null;
 let syncingAccount = false;
 let accountDataReady = false;
 let selectedImage = null;
+let researchInProgress = false;
 const messageImageUrls = new Set();
 
 function accountStorageKey(baseKey, owner = accountOwner) {
@@ -125,6 +131,12 @@ function persistLocalMemory() {
 async function persistAccountPreferences() {
   persistLocalMemory();
   if (!accountSyncEnabled || accountOwner === "guest") return;
+  const nextPreferences = {
+    ...accountPreferences,
+    assistantMemory: studentMemory,
+    assistantMemoryEnabled: memoryEnabled,
+    privateKnowledgeEnabled,
+  };
   try {
     const response = await fetch("/api/account/data/preferences", {
       method: "PUT",
@@ -132,18 +144,35 @@ async function persistAccountPreferences() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         expectedUserId: accountOwner,
-        data: {
-          ...accountPreferences,
-          assistantMemory: studentMemory,
-          assistantMemoryEnabled: memoryEnabled,
-        },
+        data: nextPreferences,
       }),
     });
     if (!response.ok) throw new Error("Account sync failed");
+    accountPreferences = nextPreferences;
     elements.memoryStatus.textContent = memoryStatusText("Saved to your account.");
   } catch {
     elements.memoryStatus.textContent = memoryStatusText("Saved on this device; account sync needs a retry.");
   }
+}
+
+function readPrivateKnowledgePreference(owner, preferences = {}) {
+  if (owner === "guest") return false;
+  if (typeof preferences.privateKnowledgeEnabled === "boolean") {
+    try {
+      localStorage.setItem(accountStorageKey(PRIVATE_KNOWLEDGE_STORAGE_KEY, owner), String(preferences.privateKnowledgeEnabled));
+    } catch {
+      // The account preference remains authoritative when local storage is unavailable.
+    }
+    return preferences.privateKnowledgeEnabled;
+  }
+  try {
+    const saved = localStorage.getItem(accountStorageKey(PRIVATE_KNOWLEDGE_STORAGE_KEY, owner));
+    if (saved === "true") return true;
+    if (saved === "false") return false;
+  } catch {
+    // Signed-in users use the account default even when local storage is unavailable.
+  }
+  return true;
 }
 
 function persistConversations() {
@@ -189,7 +218,6 @@ async function syncAccountConversations() {
       memoryEnabled = false;
       accountPreferences = {};
     }
-
     let records = {};
     accountSyncEnabled = false;
     if (accountOwner !== "guest") {
@@ -208,6 +236,7 @@ async function syncAccountConversations() {
     accountPreferences = records?.preferences && typeof records.preferences === "object" && !Array.isArray(records.preferences)
       ? records.preferences
       : {};
+    privateKnowledgeEnabled = readPrivateKnowledgePreference(accountOwner, accountPreferences);
     const remoteMemory = {
       entries: normalizeMemoryEntries(accountPreferences.assistantMemory),
       enabled: accountPreferences.assistantMemoryEnabled === true,
@@ -232,6 +261,7 @@ async function syncAccountConversations() {
     renderHistory();
     renderMemoryList();
     renderStorageNote();
+    renderPrivateKnowledgeToggle();
     renderConversation();
     if (elements.storageNote && accountOwner !== "guest") {
       elements.storageNote.textContent = accountSyncEnabled
@@ -242,6 +272,7 @@ async function syncAccountConversations() {
     accountSyncEnabled = false;
     if (!conversations.length && accountOwner === "guest") conversations = readConversations(STORAGE_KEY);
     if (accountOwner === "guest") {
+      privateKnowledgeEnabled = false;
       const localMemory = readLocalMemory("guest");
       if (localMemory) {
         studentMemory = localMemory.entries;
@@ -252,17 +283,32 @@ async function syncAccountConversations() {
     renderHistory();
     renderMemoryList();
     renderStorageNote();
+    renderPrivateKnowledgeToggle();
     renderConversation();
   } finally {
     syncingAccount = false;
     accountDataReady = true;
     renderMemoryList();
+    renderPrivateKnowledgeToggle();
   }
 }
 
+function renderPrivateKnowledgeToggle() {
+  if (!elements.privateKnowledgeToggle) return;
+  const signedIn = accountOwner !== "guest";
+  elements.privateKnowledgeToggle.checked = privateKnowledgeEnabled;
+  elements.privateKnowledgeToggle.disabled = !accountDataReady || !signedIn || isLoading;
+  elements.privateKnowledgeStatus.textContent = !signedIn
+    ? "Sign in to use your private files. Approved shared sources are checked automatically."
+    : privateKnowledgeEnabled
+      ? "On for your account: relevant passages from your files may be sent with your question to the AI provider. This does not train the model; you can turn it off here."
+      : "Off for your account: private files will not be sent with questions. Approved shared sources are still checked automatically.";
+}
+
 async function persistAccountPreferencesIfNeeded(localMemory) {
-  if (localMemory) return;
-  if (!studentMemory.length && !memoryEnabled) return;
+  const privateKnowledgePreferenceMissing = typeof accountPreferences.privateKnowledgeEnabled !== "boolean";
+  if (localMemory && !privateKnowledgePreferenceMissing) return;
+  if (!privateKnowledgePreferenceMissing && !studentMemory.length && !memoryEnabled) return;
   await persistAccountPreferences();
 }
 
@@ -652,12 +698,101 @@ function createMessageNode(message) {
           link.rel = "noopener noreferrer";
           link.textContent = source.title.slice(0, 180) || url.hostname;
           item.append(link);
+          if (typeof source.publicationDate === "string" && /^\d{4}(?:-\d{2})?(?:-\d{2})?$/.test(source.publicationDate)) {
+            const date = document.createElement("span");
+            date.className = "research-source-date";
+            date.textContent = ` · Published ${source.publicationDate}`;
+            item.append(date);
+          }
+          if (typeof source.snippet === "string" && source.snippet.trim()) {
+            const snippet = document.createElement("p");
+            snippet.className = "research-source-snippet";
+            snippet.textContent = source.snippet.slice(0, 500);
+            item.append(snippet);
+          }
           list.append(item);
         } catch {
           // Invalid stored citation URLs are never rendered as links.
         }
       }
       if (list.childElementCount) researchInfo.append(heading, list);
+    }
+  }
+
+  let knowledgeInfo = null;
+  if (message.role === "assistant" && message.knowledgeCenter && typeof message.knowledgeCenter === "object") {
+    knowledgeInfo = document.createElement("aside");
+    knowledgeInfo.className = `message-knowledge${message.knowledgeCenter.used ? " used" : ""}`;
+    knowledgeInfo.setAttribute("aria-label", "Knowledge Center use and citations");
+    const status = document.createElement("p");
+    status.className = "knowledge-status";
+    status.textContent = String(message.knowledgeCenter.notice || "Knowledge Center source status unavailable.");
+    knowledgeInfo.append(status);
+    const sources = Array.isArray(message.knowledgeCenter.sources)
+      ? message.knowledgeCenter.sources.slice(0, 12)
+      : [];
+    if (sources.length) {
+      const heading = document.createElement("strong");
+      heading.className = "knowledge-sources-heading";
+      heading.textContent = "Knowledge Center sources";
+      const list = document.createElement("ol");
+      list.className = "knowledge-sources";
+      for (const source of sources) {
+        if (typeof source?.title !== "string" || !source.title.trim()) continue;
+        const item = document.createElement("li");
+        const citation = document.createElement("span");
+        citation.textContent = `${source.title.slice(0, 180)}${Number.isInteger(source.page) ? ` · p. ${source.page}` : ""}`;
+        item.append(citation);
+        const detail = [
+          source.subject,
+          Number.isInteger(source.grade) ? `Grade ${source.grade}` : "",
+          source.topic,
+          source.author,
+          source.publication,
+          source.source,
+        ]
+          .filter(value => typeof value === "string" && value.trim())
+          .join(" · ");
+        if (detail) {
+          const note = document.createElement("p");
+          note.className = "knowledge-source-detail";
+          note.textContent = detail.slice(0, 500);
+          item.append(note);
+        }
+        list.append(item);
+      }
+      if (list.childElementCount) knowledgeInfo.append(heading, list);
+    }
+  }
+
+  let privateKnowledgeInfo = null;
+  if (message.role === "assistant" && message.privateKnowledge && typeof message.privateKnowledge === "object") {
+    privateKnowledgeInfo = document.createElement("aside");
+    privateKnowledgeInfo.className = `message-knowledge private${message.privateKnowledge.used ? " used" : ""}`;
+    privateKnowledgeInfo.setAttribute("aria-label", "Private Knowledge Center use and citations");
+    const status = document.createElement("p");
+    status.className = "knowledge-status";
+    status.textContent = String(message.privateKnowledge.notice || "Private file source status unavailable.");
+    privateKnowledgeInfo.append(status);
+    const sources = Array.isArray(message.privateKnowledge.sources) ? message.privateKnowledge.sources.slice(0, 12) : [];
+    if (sources.length) {
+      const heading = document.createElement("strong");
+      heading.className = "knowledge-sources-heading";
+      heading.textContent = "Your private file sources";
+      const list = document.createElement("ol");
+      list.className = "knowledge-sources";
+      for (const source of sources) {
+        if (typeof source?.id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(source.id)) continue;
+        const item = document.createElement("li");
+        const link = document.createElement("a");
+        link.href = `/api/knowledge/documents/${encodeURIComponent(source.id)}/file`;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = `${String(source.title || "Private file").slice(0, 180)}${Number.isInteger(source.page) ? ` · p. ${source.page}` : ""}`;
+        item.append(link);
+        list.append(item);
+      }
+      if (list.childElementCount) privateKnowledgeInfo.append(heading, list);
     }
   }
 
@@ -682,9 +817,73 @@ function createMessageNode(message) {
     contentWrap.append(usageNote);
   }
   if (researchInfo) contentWrap.append(researchInfo);
+  if (knowledgeInfo) contentWrap.append(knowledgeInfo);
+  if (privateKnowledgeInfo) contentWrap.append(privateKnowledgeInfo);
+  if (message.role === "assistant") {
+    const actions = document.createElement("div");
+    actions.className = "message-actions";
+    const copy = document.createElement("button");
+    copy.type = "button";
+    copy.textContent = "Copy";
+    copy.setAttribute("aria-label", "Copy Mina Teach AI answer");
+    copy.addEventListener("click", () => void copyAssistantAnswer(copy, message.content));
+    actions.append(copy);
+
+    const conversation = getActiveConversation();
+    const latestAssistant = conversation?.messages?.at(-1)?.id === message.id;
+    if (latestAssistant) {
+      const regenerate = document.createElement("button");
+      regenerate.type = "button";
+      regenerate.textContent = "Regenerate";
+      regenerate.setAttribute("aria-label", "Regenerate the latest Mina Teach AI answer");
+      regenerate.addEventListener("click", () => regenerateAssistantAnswer(message.id));
+      actions.append(regenerate);
+    }
+    contentWrap.append(actions);
+  }
   contentWrap.append(time);
   wrapper.append(mark, contentWrap);
   return wrapper;
+}
+
+async function copyAssistantAnswer(button, text) {
+  const originalLabel = button.textContent;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(String(text || ""));
+    } else {
+      const field = document.createElement("textarea");
+      field.value = String(text || "");
+      field.setAttribute("readonly", "");
+      field.style.position = "fixed";
+      field.style.opacity = "0";
+      document.body.append(field);
+      field.select();
+      const copied = document.execCommand("copy");
+      field.remove();
+      if (!copied) throw new Error("Clipboard access is unavailable.");
+    }
+    button.textContent = "Copied";
+  } catch {
+    button.textContent = "Copy unavailable";
+  }
+  window.setTimeout(() => {
+    if (button.isConnected) button.textContent = originalLabel;
+  }, 1800);
+}
+
+function regenerateAssistantAnswer(messageId) {
+  if (isLoading) return;
+  const conversation = getActiveConversation();
+  const index = conversation?.messages?.findIndex(message => message.id === messageId) ?? -1;
+  if (index < 1 || index !== conversation.messages.length - 1) return;
+  const question = conversation.messages[index - 1];
+  if (question?.role !== "user") return;
+  conversation.messages.splice(index, 1);
+  conversation.updatedAt = new Date().toISOString();
+  persistConversations();
+  renderConversation();
+  void sendMessage(question.content, true);
 }
 
 function renderConversation() {
@@ -785,7 +984,7 @@ function createTypingIndicator() {
   const indicator = document.createElement("div");
   indicator.className = "typing-indicator";
   indicator.setAttribute("role", "status");
-  indicator.setAttribute("aria-label", "Checking whether current web sources are needed");
+  indicator.setAttribute("aria-label", researchInProgress ? "Search the Web is checking current public sources" : "Mina Teach AI is preparing an answer");
 
   const mark = document.createElement("span");
   mark.className = "message-mark";
@@ -796,7 +995,7 @@ function createTypingIndicator() {
   dots.setAttribute("aria-hidden", "true");
   for (let i = 0; i < 3; i += 1) dots.append(document.createElement("span"));
   const text = document.createElement("span");
-  text.textContent = "Checking whether current web sources are needed";
+  text.textContent = researchInProgress ? "Search the Web · checking current public sources" : "Working on your question";
   indicator.append(mark, dots, text);
   return indicator;
 }
@@ -1017,8 +1216,10 @@ async function sendMessage(rawMessage, isRetry = false) {
   elements.messageInput.value = "";
   resizeInput();
   isLoading = true;
+  renderPrivateKnowledgeToggle();
+  researchInProgress = false;
   updateSendButton();
-  setStatus("checking", "Checking if web search is needed");
+  setStatus("checking", "Preparing answer");
   renderConversation();
 
   const history = (isRetry ? priorMessages.slice(0, -1) : priorMessages).map((message) => ({
@@ -1031,24 +1232,25 @@ async function sendMessage(rawMessage, isRetry = false) {
   try {
     const response = await fetch("/api/assistant/chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream, application/json" },
       body: JSON.stringify({
         grade: Number(conversation.grade),
         language: conversation.language,
         message: isRetry ? messageText : messageText,
         history,
+        streamResearch: true,
         ...(memoryEnabled && studentMemory.length
           ? { studentMemory: studentMemory.map(item => item.text) }
           : {}),
+        ...(privateKnowledgeEnabled ? { usePersonalKnowledge: true } : {}),
         ...(imageDataUrl ? { imageDataUrl } : {}),
       }),
     });
-    const result = await response.json();
-    if (!response.ok) {
-      const error = new Error(result?.error?.message || "Your question could not be sent. Please try again.");
-      error.code = result?.error?.code || "";
-      throw error;
-    }
+    const result = await readAssistantResearchResponse(response, () => {
+      researchInProgress = true;
+      setStatus("searching", "Search the Web");
+      renderConversation();
+    });
     if (typeof result.answer !== "string") {
       throw new Error("The tutor returned an unexpected response. Please try again.");
     }
@@ -1072,6 +1274,40 @@ async function sendMessage(rawMessage, isRetry = false) {
               ? result.webResearch.sources.slice(0, 12).map((source) => ({
                   title: String(source?.title || "").slice(0, 180),
                   url: String(source?.url || "").slice(0, 2_000),
+                  publicationDate: typeof source?.publicationDate === "string" ? source.publicationDate.slice(0, 40) : "",
+                  snippet: typeof source?.snippet === "string" ? source.snippet.slice(0, 500) : "",
+                }))
+              : [],
+          }
+        : null,
+      knowledgeCenter: result.knowledgeCenter && typeof result.knowledgeCenter === "object"
+        ? {
+            used: result.knowledgeCenter.used === true,
+            notice: typeof result.knowledgeCenter.notice === "string" ? result.knowledgeCenter.notice.slice(0, 400) : "",
+            sources: Array.isArray(result.knowledgeCenter.sources)
+              ? result.knowledgeCenter.sources.slice(0, 12).map(source => ({
+                  title: String(source?.title || "").slice(0, 180),
+                  page: Number.isInteger(source?.page) && source.page > 0 ? source.page : null,
+                  source: String(source?.source || "").slice(0, 300),
+                  author: String(source?.author || "").slice(0, 180),
+                  publication: String(source?.publication || "").slice(0, 240),
+                  subject: String(source?.subject || "").slice(0, 80),
+                  grade: Number.isInteger(source?.grade) ? source.grade : null,
+                  topic: String(source?.topic || "").slice(0, 180),
+                  language: String(source?.language || "").slice(0, 8),
+                }))
+              : [],
+          }
+        : null,
+      privateKnowledge: result.privateKnowledge && typeof result.privateKnowledge === "object"
+        ? {
+            used: result.privateKnowledge.used === true,
+            notice: typeof result.privateKnowledge.notice === "string" ? result.privateKnowledge.notice.slice(0, 400) : "",
+            sources: Array.isArray(result.privateKnowledge.sources)
+              ? result.privateKnowledge.sources.slice(0, 12).map(source => ({
+                  id: String(source?.id || "").slice(0, 64),
+                  title: String(source?.title || "").slice(0, 180),
+                  page: Number.isInteger(source?.page) && source.page > 0 ? source.page : null,
                 }))
               : [],
           }
@@ -1137,7 +1373,9 @@ async function sendMessage(rawMessage, isRetry = false) {
       );
     }
   } finally {
+    researchInProgress = false;
     isLoading = false;
+    renderPrivateKnowledgeToggle();
     persistConversations();
     renderConversation();
     updateSendButton();
@@ -1192,6 +1430,21 @@ elements.memoryAddForm.addEventListener("submit", (event) => {
 });
 elements.memoryEnabled.addEventListener("change", () => {
   memoryEnabled = elements.memoryEnabled.checked;
+  void persistAccountPreferences();
+});
+elements.privateKnowledgeToggle.addEventListener("change", () => {
+  if (accountOwner === "guest") {
+    privateKnowledgeEnabled = false;
+    renderPrivateKnowledgeToggle();
+    return;
+  }
+  privateKnowledgeEnabled = elements.privateKnowledgeToggle.checked;
+  try {
+    localStorage.setItem(accountStorageKey(PRIVATE_KNOWLEDGE_STORAGE_KEY), String(privateKnowledgeEnabled));
+  } catch {
+    elements.privateKnowledgeStatus.textContent = "This browser could not save the setting locally; account sync will be attempted.";
+  }
+  renderPrivateKnowledgeToggle();
   void persistAccountPreferences();
 });
 elements.galleryButton.addEventListener("click", () => elements.galleryInput.click());

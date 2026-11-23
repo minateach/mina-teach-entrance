@@ -87,8 +87,9 @@ export async function requestMiniMaxChat(connectors, messages, model = defaultMi
 
 export function shouldUseGeminiForRequest(message, hasImage = false) {
   if (hasImage) return true;
-  return /\b(search|browse|web|internet|latest|today|recent|news|weather|price|exchange rate|live|right now|this week|this month|this year|202[6-9])\b/i.test(message)
+  return /\b(search|browse|web|internet|latest|today|recent(?:ly)?|news|weather|price|exchange rate|live|right now|now|currently|as of|up[- ]to[- ]date|this week|this month|this year|202[6-9])\b/i.test(message)
     || /\bcurrent\s+(information|events?|price|rate|policy|president|prime minister|version|weather|guidance|news)\b/i.test(message)
+    || /\b(?:who is|who's|who holds)\s+(?:(?:the|ethiopia's|the ethiopian)\s+)?(?:president|prime minister|education minister|head of government)\b/i.test(message)
     || /ዛሬ|አሁን|የቅርብ|ወቅታዊ|ዜና|ዋጋ|መጠን|ሰሞኑን/u.test(message)
     || /\b(ammee|har'a|amma|haaraa|odeeffannoo yeroo ammaa|gatii|guyyaa kana)\b/i.test(message);
 }
@@ -97,10 +98,10 @@ export function normalizeStudentMemory(value) {
   if (!Array.isArray(value)) return [];
   const entries = [];
   let total = 0;
-  for (const item of value.slice(0, 12)) {
+  for (const item of value.slice(0, 20)) {
     if (typeof item !== "string") continue;
     const text = item.trim().replace(/\s+/g, " ").slice(0, 240);
-    if (!text || total + text.length > 2_000) continue;
+    if (!text || total + text.length > 4_800) continue;
     entries.push(text);
     total += text.length;
   }

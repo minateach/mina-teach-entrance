@@ -90,33 +90,77 @@ async function prepareFile(file) {
     throw new Error("Choose a JPG, PNG, or WEBP image.");
   }
   if (file.size > 12 * 1024 * 1024) throw new Error("Choose an image smaller than 12 MB.");
-  if (typeof createImageBitmap !== "function") {
-    if (file.size > 5 * 1024 * 1024) throw new Error("This browser cannot resize the image. Choose one under 5 MB.");
-    return file;
-  }
-  let bitmap;
+  const decoded = await decodeImageFile(file);
   try {
-    bitmap = await createImageBitmap(file);
-    if (bitmap.width < 128 || bitmap.height < 128 || bitmap.width * bitmap.height > 50_000_000) {
+    if (decoded.width < 128 || decoded.height < 128 || decoded.width * decoded.height > 50_000_000) {
       throw new Error("Choose a still image at least 128 px wide and tall.");
     }
-    const ratio = Math.max(bitmap.width, bitmap.height) / Math.min(bitmap.width, bitmap.height);
+    const ratio = Math.max(decoded.width, decoded.height) / Math.min(decoded.width, decoded.height);
     if (ratio > 4) throw new Error("Choose an image with a shape no wider than 4:1.");
-    const scale = Math.min(1, 2_048 / Math.max(bitmap.width, bitmap.height));
     const canvas = document.createElement("canvas");
-    canvas.width = Math.max(128, Math.round(bitmap.width * scale));
-    canvas.height = Math.max(128, Math.round(bitmap.height * scale));
     const context = canvas.getContext("2d", { alpha: false });
     if (!context) throw new Error("This browser cannot prepare the image.");
-    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    const blob = await new Promise((resolve, reject) => {
-      canvas.toBlob(result => result ? resolve(result) : reject(new Error("The image could not be prepared.")), "image/jpeg", 0.86);
-    });
-    const name = `${String(file.name || "image").replace(/\.[^.]*$/, "").slice(0, 100) || "image"}.jpg`;
-    return new File([blob], name, { type: "image/jpeg", lastModified: Date.now() });
+    let scale = Math.min(1, 2_048 / Math.max(decoded.width, decoded.height));
+    const qualities = [0.86, 0.78, 0.7, 0.76, 0.72, 0.68, 0.64];
+    for (let attempt = 0; attempt < qualities.length; attempt += 1) {
+      canvas.width = Math.max(128, Math.round(decoded.width * scale));
+      canvas.height = Math.max(128, Math.round(decoded.height * scale));
+      context.drawImage(decoded.image, 0, 0, canvas.width, canvas.height);
+      const blob = await canvasToJpeg(canvas, qualities[attempt]);
+      // Stay below the server's 5 MB decoded-image limit and leave room for
+      // base64/JSON overhead in the request body.
+      if (blob.size <= 4.75 * 1024 * 1024) {
+        const name = `${String(file.name || "image").replace(/\.[^.]*$/, "").slice(0, 100) || "image"}.jpg`;
+        return new File([blob], name, { type: "image/jpeg", lastModified: Date.now() });
+      }
+      scale *= 0.82;
+    }
+    throw new Error("This photo is still too large after resizing. Choose a smaller image.");
   } finally {
-    bitmap?.close?.();
+    decoded.close();
   }
+}
+
+async function decodeImageFile(file) {
+  if (typeof createImageBitmap === "function") {
+    try {
+      const bitmap = await createImageBitmap(file);
+      return {
+        image: bitmap,
+        width: bitmap.width,
+        height: bitmap.height,
+        close: () => bitmap.close?.(),
+      };
+    } catch {
+      // Some mobile browsers expose createImageBitmap but cannot decode every
+      // supported photo through it. Fall back to the browser's image decoder.
+    }
+  }
+
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = await new Promise((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error("This photo could not be opened on this device."));
+      element.src = objectUrl;
+    });
+    return {
+      image,
+      width: image.naturalWidth,
+      height: image.naturalHeight,
+      close: () => URL.revokeObjectURL(objectUrl),
+    };
+  } catch (error) {
+    URL.revokeObjectURL(objectUrl);
+    throw error;
+  }
+}
+
+function canvasToJpeg(canvas, quality) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("The image could not be prepared.")), "image/jpeg", quality);
+  });
 }
 
 async function selectFile(file) {
@@ -148,22 +192,20 @@ async function applyLocalImageEdits() {
     setStatus("Choose a photo before applying offline edits.", "error");
     return;
   }
-  let bitmap;
+  let decoded;
   try {
-    bitmap = await createImageBitmap(sourceFile);
+    decoded = await decodeImageFile(sourceFile);
     const rotated = Math.abs(localRotation % 180) === 90;
     const canvas = document.createElement("canvas");
-    canvas.width = rotated ? bitmap.height : bitmap.width;
-    canvas.height = rotated ? bitmap.width : bitmap.height;
+    canvas.width = rotated ? decoded.height : decoded.width;
+    canvas.height = rotated ? decoded.width : decoded.height;
     const context = canvas.getContext("2d");
     if (!context) throw new Error("This browser cannot edit the image on this device.");
     context.filter = `brightness(${elements.localBrightness.value}%) contrast(${elements.localContrast.value}%)${localGrayscale ? " grayscale(1)" : ""}`;
     context.translate(canvas.width / 2, canvas.height / 2);
     context.rotate(localRotation * Math.PI / 180);
-    context.drawImage(bitmap, -bitmap.width / 2, -bitmap.height / 2);
-    const blob = await new Promise((resolve, reject) => {
-      canvas.toBlob(value => value ? resolve(value) : reject(new Error("The edited image could not be prepared.")), "image/jpeg", 0.92);
-    });
+    context.drawImage(decoded.image, -decoded.width / 2, -decoded.height / 2);
+    const blob = await canvasToJpeg(canvas, 0.92);
     clearUrl(resultUrl);
     resultBlob = blob;
     resultUrl = URL.createObjectURL(blob);
@@ -176,7 +218,7 @@ async function applyLocalImageEdits() {
   } catch (error) {
     setStatus(error.message || "The photo could not be edited on this device.", "error");
   } finally {
-    bitmap?.close?.();
+    decoded?.close();
   }
 }
 
@@ -316,8 +358,9 @@ async function runImageRequest() {
   if (!prompt || (mode === "edit" && !sourceFile)) return;
 
   isProcessing = true;
+  clearResult();
   updateRunButton();
-  setStatus(mode === "edit" ? "Sending your photo securely to MiniMax H3-Image…" : "Sending your prompt to MiniMax H3-Image…");
+  setStatus(mode === "edit" ? "Sending your photo securely to the AI image service…" : "Sending your prompt to the AI image service…");
   try {
     const request = { mode, prompt };
     if (mode === "edit") {
@@ -328,9 +371,9 @@ async function runImageRequest() {
         reader.onerror = () => reject(new Error("The photo could not be read from this device."));
         reader.readAsDataURL(sourceFile);
       });
-      setStatus("MiniMax is creating one 1K result. This may take a few minutes…");
+      setStatus("Creating one image result. This may take a few minutes…");
     } else {
-      setStatus("MiniMax is creating one 1K image. This may take a few minutes…");
+      setStatus("Creating one image. This may take a few minutes…");
     }
     const response = await fetch("/api/image-studio/process", {
       method: "POST",
@@ -348,7 +391,7 @@ async function runImageRequest() {
     elements.resultPreview.hidden = false;
     elements.resultPlaceholder.hidden = true;
     elements.resultActions.hidden = false;
-    elements.previewState.textContent = `${result.width} × ${result.height} · MiniMax H3-Image`;
+    elements.previewState.textContent = `${result.width} × ${result.height} · AI result`;
     setStatus("Your AI result is ready. The original image is unchanged.", "success");
   } catch (error) {
     setStatus(error.message || "The image request failed. No automatic retry was made.", "error");

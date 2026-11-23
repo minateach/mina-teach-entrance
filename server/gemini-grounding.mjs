@@ -1,5 +1,14 @@
 export const monthlyGroundingRequestCap = 100;
 
+function availablePublicationDate(web) {
+  const value = [web?.publicationDate, web?.publishedDate, web?.published_date, web?.date]
+    .find(item => typeof item === "string" && item.trim());
+  if (!value) return null;
+  const date = value.trim().slice(0, 40);
+  if (!/^\d{4}(?:-\d{2})?(?:-\d{2})?$/.test(date) || !Number.isFinite(Date.parse(date))) return null;
+  return date;
+}
+
 export function utcMonthStart(date = new Date()) {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-01`;
 }
@@ -26,10 +35,15 @@ export function parseGeminiGrounding(providerBody) {
       const url = new URL(web.uri);
       if (url.protocol !== "https:" || url.username || url.password || seen.has(url.href)) continue;
       seen.add(url.href);
-      sources.push({
+      const source = {
         title: String(web.title || url.hostname).trim().slice(0, 180) || url.hostname,
         url: url.href,
-      });
+      };
+      const publicationDate = availablePublicationDate(web);
+      if (publicationDate) source.publicationDate = publicationDate;
+      const snippet = typeof web.snippet === "string" ? web.snippet : typeof web.description === "string" ? web.description : "";
+      if (snippet.trim()) source.snippet = snippet.trim().slice(0, 500);
+      sources.push(source);
       if (sources.length >= 12) break;
     } catch {
       // Ignore malformed provider citations; never render them as links.
@@ -38,7 +52,7 @@ export function parseGeminiGrounding(providerBody) {
 
   return {
     answer,
-    searchedWeb: searchQueryCount > 0,
+    searchedWeb: searchQueryCount > 0 || sources.length > 0,
     searchQueryCount,
     sources,
   };

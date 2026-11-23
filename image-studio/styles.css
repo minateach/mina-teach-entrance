@@ -53,7 +53,7 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
 .hero h1 { margin: 0; font-size: clamp(28px, 4vw, 42px); letter-spacing: -.04em; }
 .hero-copy > p:last-child { max-width: 580px; margin: 10px 0 0; color: #dce8fb; font-size: 14px; line-height: 1.6; }
 .provider-note { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; padding: 10px 12px; border: 1px solid #ffffff38; border-radius: 999px; background: #ffffff12; color: #e8f2ff; font-size: 10px; }
-.provider-dot { width: 8px; height: 8px; border-radius: 50%; background: #69e3ad; box-shadow: 0 0 0 4px #69e3ad22; }
+.provider-dot { width: 8px; height: 8px; border-radius: 50%; background: #8bb5ff; box-shadow: 0 0 0 4px #8bb5ff22; }
 .studio-card { padding: clamp(16px, 2.6vw, 30px); border: 1px solid #dfe7f2; border-radius: 22px; background: var(--surface); box-shadow: 0 16px 48px #173a6310; }
 .mode-tabs { display: flex; gap: 8px; margin-bottom: 24px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
 .mode-tab { padding: 10px 15px; border: 1px solid transparent; border-radius: 11px; color: var(--muted); background: transparent; font-size: 13px; font-weight: 700; }
