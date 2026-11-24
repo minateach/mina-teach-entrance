@@ -1,4 +1,5 @@
-export const monthlyGroundingRequestCap = 100;
+export const dailyGroundingRequestCap = 100;
+export const monthlyGroundingRequestCap = 1_000;
 
 function availablePublicationDate(web) {
   const value = [web?.publicationDate, web?.publishedDate, web?.published_date, web?.date]
@@ -11,6 +12,10 @@ function availablePublicationDate(web) {
 
 export function utcMonthStart(date = new Date()) {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-01`;
+}
+
+export function utcDayStart(date = new Date()) {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
 }
 
 export function parseGeminiGrounding(providerBody) {
@@ -58,16 +63,35 @@ export function parseGeminiGrounding(providerBody) {
   };
 }
 
-export async function reserveGroundingRequest(pool, monthStart, cap = monthlyGroundingRequestCap) {
+export async function reserveGroundingRequest(
+  pool,
+  monthStart,
+  dayStart,
+  dailyCap = dailyGroundingRequestCap,
+  monthlyCap = monthlyGroundingRequestCap,
+) {
   const result = await pool.query(
-    `INSERT INTO mina_gemini_grounding_usage (usage_month, grounded_requests, search_queries, updated_at)
-     VALUES ($1::date, 1, 0, NOW())
+    `INSERT INTO mina_gemini_grounding_usage (
+       usage_month, grounded_requests, search_queries, usage_day, daily_grounded_requests, updated_at
+     )
+     VALUES ($1::date, 1, 0, $2::date, 1, NOW())
      ON CONFLICT (usage_month) DO UPDATE
        SET grounded_requests = mina_gemini_grounding_usage.grounded_requests + 1,
+           daily_grounded_requests = CASE
+             WHEN mina_gemini_grounding_usage.usage_day = EXCLUDED.usage_day
+               THEN mina_gemini_grounding_usage.daily_grounded_requests + 1
+             ELSE 1
+           END,
+           usage_day = EXCLUDED.usage_day,
            updated_at = NOW()
-       WHERE mina_gemini_grounding_usage.grounded_requests < $2
-     RETURNING grounded_requests`,
-    [monthStart, cap],
+       WHERE mina_gemini_grounding_usage.grounded_requests < $4
+         AND CASE
+           WHEN mina_gemini_grounding_usage.usage_day = EXCLUDED.usage_day
+             THEN mina_gemini_grounding_usage.daily_grounded_requests
+           ELSE 0
+         END < $3
+     RETURNING grounded_requests, daily_grounded_requests`,
+    [monthStart, dayStart, dailyCap, monthlyCap],
   );
   return result.rowCount > 0;
 }

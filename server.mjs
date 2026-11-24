@@ -35,10 +35,12 @@ import {
   shouldUseGeminiForRequest,
 } from "./server/minimax-chat.mjs";
 import {
+  dailyGroundingRequestCap,
   monthlyGroundingRequestCap,
   parseGeminiGrounding,
   recordGroundingQueries,
   reserveGroundingRequest,
+  utcDayStart,
   utcMonthStart,
 } from "./server/gemini-grounding.mjs";
 import { CLERK_PROXY_PATH, clerkProxyMiddleware, getClerkProxyHost } from "./server/middlewares/clerkProxyMiddleware.mjs";
@@ -823,7 +825,9 @@ async function handleAssistantChat(request, response) {
     }
   }
 
-  const groundingMonth = utcMonthStart();
+  const groundingNow = new Date();
+  const groundingMonth = utcMonthStart(groundingNow);
+  const groundingDay = utcDayStart(groundingNow);
   let groundingEnabled = false;
   let searchNotice = "";
   if (imageInput) {
@@ -833,10 +837,12 @@ async function handleAssistantChat(request, response) {
       groundingEnabled = await reserveGroundingRequest(
         pool,
         groundingMonth,
+        groundingDay,
+        dailyGroundingRequestCap,
         monthlyGroundingRequestCap,
       );
       if (!groundingEnabled) {
-        searchNotice = "The app's monthly web-search safeguard has been reached. No web search was run, so the answer may not reflect current information.";
+        searchNotice = "The app's daily or monthly web-search safeguard has been reached. No web search was run, so the answer may not reflect current information.";
       }
     } catch (error) {
       console.error("[assistant] Google Search budget check failed.", { name: error?.name || "Error" });
@@ -1088,6 +1094,7 @@ async function handleAssistantStatus(response) {
     geminiAvailable: geminiStatusCache.available,
     geminiLastErrorCode: geminiStatusCache.code || null,
     googleSearchGrounding: "enabled-when-available",
+    dailyGroundedRequestCap: dailyGroundingRequestCap,
     monthlyGroundedRequestCap: monthlyGroundingRequestCap,
     message,
   });

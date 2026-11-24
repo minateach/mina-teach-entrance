@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  dailyGroundingRequestCap,
   monthlyGroundingRequestCap,
   parseGeminiGrounding,
   recordGroundingQueries,
   reserveGroundingRequest,
+  utcDayStart,
   utcMonthStart,
 } from "../server/gemini-grounding.mjs";
 
@@ -64,14 +66,22 @@ test("no grounding metadata is reported as not searched", () => {
   });
 });
 
-test("monthly budget uses UTC and remains bounded atomically", async () => {
+test("daily and monthly web-search budgets use UTC and remain bounded atomically", async () => {
   assert.equal(utcMonthStart(new Date("2026-11-30T23:59:00Z")), "2026-11-01");
-  assert.equal(monthlyGroundingRequestCap, 100);
+  assert.equal(utcDayStart(new Date("2026-11-25T00:00:00Z")), "2026-11-25");
+  assert.equal(dailyGroundingRequestCap, 100);
+  assert.equal(monthlyGroundingRequestCap, 1_000);
   let sql = "";
-  const pool = { query: async (text) => { sql = text; return { rowCount: 1 }; } };
-  assert.equal(await reserveGroundingRequest(pool, "2026-11-01"), true);
-  assert.match(sql, /grounded_requests < \$2/);
-  assert.equal(await reserveGroundingRequest({ query: async () => ({ rowCount: 0 }) }, "2026-11-01"), false);
+  let params = [];
+  const pool = { query: async (text, values) => { sql = text; params = values; return { rowCount: 1 }; } };
+  assert.equal(await reserveGroundingRequest(pool, "2026-11-01", "2026-11-24"), true);
+  assert.match(sql, /grounded_requests < \$4/);
+  assert.match(sql, /daily_grounded_requests[\s\S]*< \$3/);
+  assert.deepEqual(params, ["2026-11-01", "2026-11-24", 100, 1_000]);
+  assert.equal(
+    await reserveGroundingRequest({ query: async () => ({ rowCount: 0 }) }, "2026-11-01", "2026-11-24"),
+    false,
+  );
 });
 
 test("grounded query usage records only positive counts", async () => {
