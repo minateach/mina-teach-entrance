@@ -14,6 +14,7 @@ export function firebaseGoogleErrorMessage(error, hostname = "this app domain") 
     "auth/unauthorized-domain": `Firebase does not authorize ${host}. Add this exact hostname under Firebase Console → Authentication → Settings → Authorized domains.`,
     "auth/invalid-api-key": "Firebase rejected the web API key for this project. Check the Web app config in Firebase Project settings; do not send the key in chat.",
     "auth/api-key-not-valid": "Firebase rejected the web API key for this project. Check the Web app config in Firebase Project settings; do not send the key in chat.",
+    "auth/api-keys-are-not-supported-by-this-api": "Firebase Authentication rejected the configured web API key. Confirm FIREBASE_WEB_API_KEY is the Web API key from this same Firebase project, then check Google Cloud Console → APIs & Services → Credentials: the key must not be restricted away from Firebase Authentication (Identity Toolkit API). Do not use an OAuth client ID or service-account credential as this key.",
     "auth/network-request-failed": "Google Sign-In could not reach Firebase. Check the internet connection and that the browser allows requests to Firebase Authentication.",
     "auth/popup-blocked": "The browser blocked the Google sign-in popup. Open Mina Teach directly in a browser tab and try again.",
     "auth/popup-closed-by-user": "Google Sign-In was cancelled before it finished. Your existing account was not changed.",
