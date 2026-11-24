@@ -1,6 +1,7 @@
 export const defaultMiniMaxChatModel = "MiniMax-M3.1-Flash";
 
 const geminiFallbackCodes = new Set([
+  "SETUP_REQUIRED",
   "GEMINI_SETUP_REQUIRED",
   "GEMINI_ACCESS_DENIED",
   "GEMINI_RATE_LIMIT",
