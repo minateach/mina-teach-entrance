@@ -1129,11 +1129,11 @@ app.get("/api/firebase/config", requireAuth, (_request, response) => {
   sendJson(response, 200, {
     config,
     capabilities: {
-      googleSignIn: true,
-      firestoreAccountBackup: true,
-      analytics: Boolean(config.measurementId),
-      messaging: Boolean(config.messagingSenderId && process.env.FIREBASE_WEB_VAPID_KEY?.trim()),
-      crashlytics: false,
+      googleSignInClientImplemented: true,
+      firestoreAccountBackupImplemented: true,
+      analyticsMeasurementIdConfigured: Boolean(config.measurementId),
+      messagingWebValuesConfigured: Boolean(config.messagingSenderId && process.env.FIREBASE_WEB_VAPID_KEY?.trim()),
+      crashlyticsSupportedOnWeb: false,
     },
   });
 });

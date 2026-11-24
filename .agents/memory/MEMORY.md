@@ -3,3 +3,4 @@
 - [Post-merge readiness](post-merge-readiness.md) — successful setup does not prove the running preview has loaded merged server changes; verify the live app.
 - [Learning content integrity](learning-content-integrity.md) — preserve every available material; delivery audits do not prove full textbook coverage, and completion follows accessed content.
 - [Android wrapper and sign-in](android-twa.md) — use a Trusted Web Activity for Android so Clerk sign-in stays in Chrome; verified fullscreen requires the Play signing fingerprint.
+- [Firebase identity migration safety](firebase-identity-migration.md) — keep Firebase additive until a tested, approved migration preserves existing account identities and data.
