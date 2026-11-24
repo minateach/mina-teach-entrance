@@ -4,6 +4,17 @@ import { ClerkProvider, SignIn, SignUp, useClerk, useUser } from "@clerk/react";
 import { publishableKeyFromHost } from "@clerk/shared/keys";
 import { Redirect, Route, Router as WouterRouter, Switch, useLocation } from "wouter";
 import { shadcn } from "@clerk/themes";
+import "./firebase.css";
+import { getApps, initializeApp } from "firebase/app";
+import {
+  GoogleAuthProvider,
+  deleteUser,
+  getAuth,
+  onAuthStateChanged,
+  reauthenticateWithPopup,
+  signInWithPopup,
+} from "firebase/auth";
+import { deleteDoc, doc, getFirestore, serverTimestamp, setDoc } from "firebase/firestore";
 import { clearOfflineOwner } from "../../learning/offline-store.js";
 import "./style.css";
 import "./brand.css";
@@ -49,6 +60,10 @@ function AccountPage() {
   const [notice, setNotice] = React.useState("");
   const [preferences, setPreferences] = React.useState({ language: "en" });
   const [profileName, setProfileName] = React.useState("");
+  const [firebaseClient, setFirebaseClient] = React.useState({ status: "loading", auth: null, firestore: null, capabilities: null });
+  const [firebaseUser, setFirebaseUser] = React.useState(null);
+  const [firebaseLink, setFirebaseLink] = React.useState({ loading: true, linked: false, firebaseUid: null });
+  const [firebaseNotice, setFirebaseNotice] = React.useState("");
   const request = async (path, options = {}) => {
     const response = await fetch(path, { credentials: "same-origin", ...options, headers: { "Content-Type": "application/json", ...(options.headers || {}) } });
     const body = await response.json();
@@ -64,6 +79,38 @@ function AccountPage() {
       setStatus("Your account data is stored securely for your signed-in account.");
     }).catch(error => setStatus(error.message));
   }, [isLoaded, user]);
+  React.useEffect(() => {
+    if (!isLoaded || !user) return;
+    let active = true;
+    let stopListening = () => {};
+    const loadFirebase = async () => {
+      try {
+        const link = await request("/api/account/firebase-link");
+        if (active) setFirebaseLink({ loading: false, linked: Boolean(link.linked), firebaseUid: link.firebaseUid || null });
+      } catch (error) {
+        if (active) setFirebaseLink({ loading: false, linked: false, firebaseUid: null, error: error.message });
+      }
+      try {
+        const result = await request("/api/firebase/config");
+        const app = getApps().find(item => item.name === "mina-teach-account")
+          || initializeApp(result.config, "mina-teach-account");
+        const auth = getAuth(app);
+        const firestore = getFirestore(app);
+        if (!active) return;
+        setFirebaseClient({ status: "ready", auth, firestore, capabilities: result.capabilities });
+        stopListening = onAuthStateChanged(auth, currentUser => {
+          if (active) setFirebaseUser(currentUser);
+        });
+      } catch (error) {
+        if (active) setFirebaseClient({ status: "unavailable", auth: null, firestore: null, capabilities: null, message: error.message });
+      }
+    };
+    void loadFirebase();
+    return () => {
+      active = false;
+      stopListening();
+    };
+  }, [isLoaded, user?.id]);
   if (!isLoaded) return <main className="account loading-account"><a className="brand" href="/"><img className="brand-logo" src="/images/0_1000107983_1794514022860.png" srcSet="/images/mina-teach-ai-logo-256.png 256w, /images/mina-teach-ai-logo-512.png 512w, /images/mina-teach-ai-logo-1024.png 1024w" sizes="64px" alt="Dambi Dollo University and Mina Teach AI logo" /><span><b>MINA TEACH AI</b><small>Dhaloota beekumsa omishuudha.</small></span></a><p>Loading account…</p></main>;
   if (!user) return <Redirect to="/sign-in" />;
   const saveRecord = async (type, data) => request(`/api/account/data/${type}`, { method: "PUT", body: JSON.stringify({ data }) });
@@ -88,11 +135,80 @@ function AccountPage() {
     const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), profile: { name: user.fullName, email: user.primaryEmailAddress?.emailAddress }, records }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "mina-teach-account-data.json"; link.click(); URL.revokeObjectURL(url);
   };
+  const connectFirebaseGoogle = async () => {
+    if (firebaseClient.status !== "ready") {
+      setFirebaseNotice("Firebase Google Sign-In is not configured yet. Your existing account is unchanged.");
+      return;
+    }
+    setBusy(true); setFirebaseNotice("");
+    try {
+      const credential = await signInWithPopup(firebaseClient.auth, new GoogleAuthProvider());
+      const idToken = await credential.user.getIdToken();
+      const link = await request("/api/account/firebase-link", { method: "POST", body: JSON.stringify({ idToken }) });
+      setFirebaseUser(credential.user);
+      setFirebaseLink({ loading: false, linked: true, firebaseUid: link.firebaseUid });
+      setFirebaseNotice("Google Sign-In is linked to this Mina Teach account. Clerk remains the current app sign-in.");
+    } catch (error) {
+      const message = error.code === "auth/operation-not-allowed"
+        ? "Enable Google as a sign-in provider in Firebase Authentication, then retry."
+        : error.message;
+      setFirebaseNotice(message || "Google Sign-In could not be linked. Please retry.");
+    } finally { setBusy(false); }
+  };
+  const saveFirebaseBackup = async () => {
+    if (firebaseClient.status !== "ready" || !firebaseUser || !firebaseLink.linked || firebaseUser.uid !== firebaseLink.firebaseUid) {
+      setFirebaseNotice("Sign in with the Google account linked to this Mina Teach account first.");
+      return;
+    }
+    setBusy(true); setFirebaseNotice("");
+    try {
+      const { records: accountRecords } = await request("/api/account/data");
+      const recordsCopy = {
+        conversations: accountRecords?.conversations ?? [],
+        learning: accountRecords?.learning ?? {},
+        preferences: accountRecords?.preferences ?? {},
+      };
+      const size = new TextEncoder().encode(JSON.stringify(recordsCopy)).length;
+      if (size > 850_000) throw new Error("This account copy is too large for one Firestore document. Nothing was shortened or uploaded.");
+      await setDoc(doc(firebaseClient.firestore, "users", firebaseUser.uid, "accountData", "backup"), {
+        schemaVersion: 1,
+        records: recordsCopy,
+        updatedAt: serverTimestamp(),
+      });
+      setFirebaseNotice("A private Firestore copy of your conversations, learning records, and preferences was saved.");
+    } catch (error) {
+      setFirebaseNotice(error.message || "The Firestore copy could not be saved. Check that Cloud Firestore is enabled.");
+    } finally { setBusy(false); }
+  };
   const deleteData = async () => {
-    if (!window.confirm("Delete supported saved account records and this browser’s local Mina Teach data, downloads, images, reminder settings, and device-only exam results? The Clerk sign-in account and separately stored online exam attempts and question bookmarks will remain.")) return;
+    if (firebaseLink.loading || firebaseClient.status === "loading") {
+      setNotice("Wait until Firebase account status has loaded, then retry deletion.");
+      return;
+    }
+    if (firebaseLink.error) {
+      setNotice("Firebase link status could not be checked. Nothing was deleted; retry when the account service is available.");
+      return;
+    }
+    if (!window.confirm("Permanently delete your Mina Teach account, saved learning data, private Knowledge Center files, online exam history, saved questions, linked Firebase Google identity and Firestore backup, plus this device’s local Mina Teach data? This cannot be undone.")) return;
     setBusy(true);
     try {
-      await request("/api/account/data", { method: "DELETE" });
+      if (firebaseLink.linked) {
+        if (firebaseClient.status !== "ready") throw new Error("Firebase is linked, but its secure sign-in is unavailable. Nothing was deleted; retry after Firebase setup is restored.");
+        let activeFirebaseUser = firebaseUser || firebaseClient.auth.currentUser;
+        const provider = new GoogleAuthProvider();
+        if (!activeFirebaseUser || activeFirebaseUser.uid !== firebaseLink.firebaseUid) {
+          activeFirebaseUser = (await signInWithPopup(firebaseClient.auth, provider)).user;
+        }
+        if (activeFirebaseUser.uid !== firebaseLink.firebaseUid) {
+          throw new Error("Sign in with the Google account linked to this Mina Teach account. No account data was deleted.");
+        }
+        await reauthenticateWithPopup(activeFirebaseUser, provider);
+        await deleteDoc(doc(firebaseClient.firestore, "users", activeFirebaseUser.uid, "accountData", "backup"));
+        await deleteUser(activeFirebaseUser);
+        setFirebaseUser(null);
+        await request("/api/account/firebase-link", { method: "DELETE" });
+      }
+      const deletion = await request("/api/account/data", { method: "DELETE" });
       Object.values(localKeys).forEach(key => localStorage.removeItem(key));
       const offlineOwner = `account:${user.id}`;
       localStorage.removeItem(`minaTeach.learning.v1:${offlineOwner}`);
@@ -105,9 +221,14 @@ function AccountPage() {
       const imagesDeleted = await deleteLocalAssistantImages();
       const offlineDataDeleted = await clearOfflineOwner(offlineOwner).then(() => true).catch(() => false);
       setRecords({}); setPreferences({ language: "en" });
-      setNotice(imagesDeleted && offlineDataDeleted
-        ? "Supported saved account records and this browser’s local Mina Teach data were deleted. Your sign-in account and separately stored online exam attempts and question bookmarks remain. Email minaseyfufa@gmail.com for help with those records."
-        : "Your server account data was deleted. Some local browser attachments or downloads could not be confirmed as removed; close other Mina Teach tabs and repeat deletion to retry.");
+      if (!deletion.signInIdentityDeleted) {
+        setNotice("Saved data was deleted, but the Clerk sign-in identity could not be removed. Contact minaseyfufa@gmail.com to finish account deletion.");
+      } else if (!imagesDeleted || !offlineDataDeleted) {
+        setNotice("Your online data and sign-in identities were deleted. Some local attachments or downloads could not be confirmed as removed; close other Mina Teach tabs and retry local cleanup.");
+      } else {
+        setNotice("Your Mina Teach account data, online exam records, saved questions, private documents, linked Firebase account, and this device’s Mina Teach data were deleted.");
+        await signOut({ redirectUrl: "/" });
+      }
     }
     catch (error) { setNotice(error.message); }
     finally { setBusy(false); }
@@ -135,6 +256,24 @@ function AccountPage() {
       <p className="eyebrow">STUDENT ACCOUNT</p><h1>Hello, {user.firstName || "student"}</h1><p className="muted">{user.primaryEmailAddress?.emailAddress}</p><p className="status" role="status">{status}</p>
       <form onSubmit={saveProfile} className="preferences"><label>Profile name<input value={profileName} maxLength={100} onChange={event => setProfileName(event.target.value)} required /></label><button disabled={busy}>Save profile</button></form>
       <form onSubmit={savePreferences} className="preferences"><label>Reply language<select value={preferences.language || "en"} onChange={event => setPreferences({ ...preferences, language: event.target.value })}><option value="en">English</option><option value="om">Afaan Oromoo</option><option value="am">Amharic</option></select></label><button disabled={busy}>Save preferences</button></form>
+      <section className="firebase-card" aria-labelledby="firebase-heading">
+        <p className="eyebrow">FIREBASE</p><h2 id="firebase-heading">Google Sign-In and private backup</h2>
+        <p className="muted">Link a Google identity to this existing Mina Teach account. Your current Clerk sign-in and PostgreSQL records remain in place; accounts are never merged by email.</p>
+        {firebaseClient.status === "loading" && <p className="status" role="status">Checking Firebase setup…</p>}
+        {firebaseClient.status === "unavailable" && <p className="status" role="status">Firebase setup is incomplete. Existing account features continue to use the current sign-in.</p>}
+        {firebaseClient.status === "ready" && <>
+          <p className="status" role="status">{firebaseLink.loading ? "Checking linked Google account…" : firebaseLink.linked ? "A Google identity is linked to this account." : "No Google identity is linked yet."}</p>
+          <div className="actions">
+            <button disabled={busy || firebaseLink.loading || firebaseLink.error} onClick={connectFirebaseGoogle}>
+              {firebaseLink.linked ? "Sign in to linked Google account" : "Connect Google Sign-In"}
+            </button>
+            {firebaseLink.linked && firebaseUser?.uid === firebaseLink.firebaseUid && <button className="secondary" disabled={busy} onClick={saveFirebaseBackup}>Save private Firestore copy</button>}
+          </div>
+          <p className="muted small">The optional Firestore copy contains conversations, learning records, and preferences only. It is not model training and excludes exam history, question bookmarks, and Knowledge Center files.</p>
+        </>}
+        {firebaseNotice && <p className="notice" role="status">{firebaseNotice}</p>}
+        <p className="muted small">To delete the full account, use Delete Mina Teach account below. If Google is linked, you must reauthenticate with that Google account before its Firebase identity and Firestore copy are removed.</p>
+      </section>
       <section className="data-section"><h2>Your saved data</h2><p>Conversations: {count(records.conversations)} · Learning records: {count(records.learning)} · Preference fields: {count(records.preferences)}</p><p className="muted small">Review conversations in AI Assistant, learning progress in Learning, and exam history or saved questions in Exams. The account page shows record counts rather than each item.</p><div className="actions"><button disabled={busy} onClick={importLocal}>Import this browser’s study data</button><button className="secondary" onClick={exportData}>Download a copy</button><button className="danger" disabled={busy} onClick={deleteData}>Delete saved Mina Teach data</button></div><p className="muted small">Import copies browser conversations and learning records to your account; it leaves the browser copy unchanged. Download includes your profile name/email and saved conversations, learning records, and preferences. It does not include separately stored online exam attempts or question bookmarks, or device-only downloads and images.</p><p className="muted small">Delete removes saved account records and this browser’s Mina Teach local study data, offline downloads, notification settings, and image attachments. It does not delete your Clerk sign-in account or separately stored online exam attempts and question bookmarks. Email <a href="mailto:minaseyfufa@gmail.com">minaseyfufa@gmail.com</a> for requests about those items; this page does not provide a bulk-delete control for them.</p>{notice && <p className="notice" role="status">{notice}</p>}</section>
     </section>
     <p className="privacy">Your account is used to save Mina Teach conversations, learning records, and preferences. Read the <a href="/privacy/">Privacy Policy</a> and <a href="/terms/">Terms of Use</a> for current data and service details.</p>

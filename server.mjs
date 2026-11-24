@@ -6,6 +6,7 @@ import express from "express";
 import multer from "multer";
 import { clerkClient, clerkMiddleware, getAuth } from "@clerk/express";
 import { publishableKeyFromHost } from "@clerk/shared/keys";
+import { createFirebaseWebConfig, ensureFirebaseIdentitySchema, verifyFirebaseGoogleIdToken } from "./server/firebase-auth.mjs";
 import { ReplitConnectors } from "@replit/connectors-sdk";
 import pg from "pg";
 import { createLearningCatalog, LearningInputError } from "./server/learning-catalog.mjs";
@@ -102,7 +103,7 @@ function setSecurityHeaders(response, legacyInlineHashes = null) {
     : "";
   response.setHeader(
     "Content-Security-Policy",
-    `default-src 'self'; connect-src 'self' https://*.clerk.accounts.dev https://clerk-telemetry.com https://cdn.protect.clerk.com https://*.client.protect.clerk.com; img-src 'self' data: blob: https:; media-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' https://*.clerk.accounts.dev https://cdn.protect.clerk.com${inlineScriptSources}${inlineHandlerSources}; worker-src 'self' blob:; frame-src https://*.clerk.accounts.dev; font-src 'self' https://fonts.gstatic.com data:; base-uri 'self'; form-action 'self'; frame-ancestors 'self'`,
+    `default-src 'self'; connect-src 'self' https://*.clerk.accounts.dev https://clerk-telemetry.com https://cdn.protect.clerk.com https://*.client.protect.clerk.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firebaseinstallations.googleapis.com https://firestore.googleapis.com https://fcmregistrations.googleapis.com https://www.google-analytics.com https://region1.analytics.google.com; img-src 'self' data: blob: https:; media-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' https://*.clerk.accounts.dev https://cdn.protect.clerk.com${inlineScriptSources}${inlineHandlerSources}; worker-src 'self' blob:; frame-src https://*.clerk.accounts.dev https://*.firebaseapp.com https://accounts.google.com; font-src 'self' https://fonts.gstatic.com data:; base-uri 'self'; form-action 'self'; frame-ancestors 'self'`,
   );
 }
 
@@ -1119,6 +1120,103 @@ app.use(clerkMiddleware(request => ({
   publishableKey: publishableKeyFromHost(getClerkProxyHost(request) || "", process.env.CLERK_PUBLISHABLE_KEY),
 })));
 
+app.get("/api/firebase/config", requireAuth, (_request, response) => {
+  const config = createFirebaseWebConfig(process.env);
+  if (!config) {
+    sendError(response, 503, "FIREBASE_SETUP_INCOMPLETE", "Firebase web sign-in is not configured yet. Ask the site administrator to finish Firebase setup.");
+    return;
+  }
+  sendJson(response, 200, {
+    config,
+    capabilities: {
+      googleSignIn: true,
+      firestoreAccountBackup: true,
+      analytics: Boolean(config.measurementId),
+      messaging: Boolean(config.messagingSenderId && process.env.FIREBASE_WEB_VAPID_KEY?.trim()),
+      crashlytics: false,
+    },
+  });
+});
+
+app.get("/api/account/firebase-link", requireAuth, async (request, response) => {
+  try {
+    await ensureFirebaseIdentitySchema(pool);
+    const result = await pool.query(
+      "SELECT firebase_uid FROM mina_firebase_identity_links WHERE clerk_user_id=$1",
+      [request.userId],
+    );
+    sendJson(response, 200, {
+      linked: Boolean(result.rows[0]?.firebase_uid),
+      firebaseUid: result.rows[0]?.firebase_uid || null,
+    });
+  } catch {
+    sendError(response, 503, "FIREBASE_LINK_UNAVAILABLE", "Firebase account-link status is temporarily unavailable.");
+  }
+});
+
+app.post("/api/account/firebase-link", requireAuth, async (request, response) => {
+  if (!requireSameOrigin(request, response)) return;
+  let client;
+  try {
+    const input = await readJsonBody(request);
+    const config = createFirebaseWebConfig(process.env);
+    if (!config) {
+      sendError(response, 503, "FIREBASE_SETUP_INCOMPLETE", "Firebase web sign-in is not configured yet.");
+      return;
+    }
+    const { uid } = await verifyFirebaseGoogleIdToken(input?.idToken, config.projectId);
+    await ensureFirebaseIdentitySchema(pool);
+    client = await pool.connect();
+    await client.query("BEGIN");
+    const byUid = await client.query(
+      "SELECT clerk_user_id FROM mina_firebase_identity_links WHERE firebase_uid=$1 FOR UPDATE",
+      [uid],
+    );
+    const byClerk = await client.query(
+      "SELECT firebase_uid FROM mina_firebase_identity_links WHERE clerk_user_id=$1 FOR UPDATE",
+      [request.userId],
+    );
+    if ((byUid.rowCount && byUid.rows[0].clerk_user_id !== request.userId)
+        || (byClerk.rowCount && byClerk.rows[0].firebase_uid !== uid)) {
+      await client.query("ROLLBACK");
+      sendError(response, 409, "FIREBASE_ACCOUNT_ALREADY_LINKED", "That Google account is already linked to a different Mina Teach account.");
+      return;
+    }
+    if (!byUid.rowCount && !byClerk.rowCount) {
+      await client.query(
+        "INSERT INTO mina_firebase_identity_links (firebase_uid,clerk_user_id) VALUES ($1,$2)",
+        [uid, request.userId],
+      );
+    }
+    await client.query("COMMIT");
+    sendJson(response, 200, { linked: true, firebaseUid: uid });
+  } catch (error) {
+    if (client) await client.query("ROLLBACK").catch(() => {});
+    sendError(
+      response,
+      error.statusCode || 503,
+      error.code || "FIREBASE_LINK_FAILED",
+      error.statusCode ? error.message : "Google sign-in could not be linked. Please retry.",
+    );
+  } finally {
+    client?.release();
+  }
+});
+
+app.delete("/api/account/firebase-link", requireAuth, async (request, response) => {
+  if (!requireSameOrigin(request, response)) return;
+  try {
+    await ensureFirebaseIdentitySchema(pool);
+    const result = await pool.query(
+      "DELETE FROM mina_firebase_identity_links WHERE clerk_user_id=$1 RETURNING firebase_uid",
+      [request.userId],
+    );
+    sendJson(response, 200, { unlinked: true, wasLinked: Boolean(result.rowCount) });
+  } catch {
+    sendError(response, 503, "FIREBASE_UNLINK_FAILED", "The Firebase link could not be removed. Please retry.");
+  }
+});
+
 app.get("/api/account/data", requireAuth, async (request, response) => {
   try {
     await ensureStudentRole(request.userId);
@@ -1452,12 +1550,29 @@ app.delete("/api/account/data", requireAuth, async (request, response) => {
   let client;
   try {
     await ensurePrivateKnowledgeSchema(pool);
+    await ensureFirebaseIdentitySchema(pool);
     client = await pool.connect();
     await client.query("BEGIN");
     await client.query("DELETE FROM mina_private_documents WHERE user_id=$1", [request.userId]);
     await client.query("DELETE FROM mina_user_records WHERE user_id = $1", [request.userId]);
+    await client.query("DELETE FROM mina_exam_attempts WHERE user_id=$1", [request.userId]);
+    await client.query("DELETE FROM mina_question_bookmarks WHERE user_id=$1", [request.userId]);
+    await client.query("DELETE FROM mina_firebase_identity_links WHERE clerk_user_id=$1", [request.userId]);
+    await client.query("DELETE FROM mina_user_roles WHERE user_id=$1", [request.userId]);
     await client.query("COMMIT");
-    sendJson(response, 200, { deleted: true });
+    try {
+      await clerkClient.users.deleteUser(request.userId);
+    } catch {
+      sendJson(response, 503, {
+        error: {
+          code: "SIGN_IN_IDENTITY_DELETE_FAILED",
+          message: "Saved account data was deleted, but the sign-in identity could not be removed. Contact the site administrator to finish deletion.",
+        },
+        dataDeleted: true,
+      });
+      return;
+    }
+    sendJson(response, 200, { deleted: true, signInIdentityDeleted: true });
   } catch {
     if (client) await client.query("ROLLBACK").catch(() => {});
     sendError(response, 500, "ACCOUNT_STORAGE_ERROR", "Your saved data could not be deleted.");

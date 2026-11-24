@@ -39,18 +39,19 @@ test("account export and deletion wording matches implemented record coverage",(
   assert.match(files.account,/minaTeach\.studyReminder\.lastDay:/);
   assert.match(files.account,/clearOfflineOwner\(offlineOwner\)/);
   assert.match(files.account,/deleteLocalAssistantImages\(\)/);
-  assert.match(files.account,/separately stored online exam attempts and question bookmarks remain/);
+  assert.match(files.account,/online exam history, saved questions, linked Firebase Google identity and Firestore backup/);
   assert.match(files.server,/DELETE FROM mina_user_records WHERE user_id = \$1/);
-  assert.doesNotMatch(files.server,/DELETE FROM mina_exam_attempts WHERE user_id/);
-  assert.doesNotMatch(files.server,/DELETE FROM mina_question_bookmarks WHERE user_id = \$1/);
-  assert.match(files.privacy,/does <strong>not<\/strong> delete your Clerk sign-in identity/);
-  assert.match(files.privacy,/separately stored online exam-attempt and question-bookmark records/);
-  assert.match(files.privacy,/does not include separately stored online exam attempts or question bookmarks/);
+  assert.match(files.server,/DELETE FROM mina_exam_attempts WHERE user_id/);
+  assert.match(files.server,/DELETE FROM mina_question_bookmarks WHERE user_id=\$1/);
+  assert.match(files.server,/clerkClient\.users\.deleteUser\(request\.userId\)/);
+  assert.match(files.privacy,/the Clerk sign-in identity/);
+  assert.match(files.privacy,/removes the Firestore copy and Firebase identity/);
+  assert.match(files.privacy,/does not include online exam attempts, question bookmarks/);
 });
 
 test("privacy language matches provider, device-storage, and current notification behavior",()=>{
   for(const phrase of [
-    "Clerk handles sign-in identity",
+    "Clerk handles the app sign-in identity",
     "Replit PostgreSQL",
     "MiniMax service",
     "Google Gemini",
@@ -61,7 +62,7 @@ test("privacy language matches provider, device-storage, and current notificatio
   ])assert.ok(files.privacy.includes(phrase),`privacy policy includes accurate behavior: ${phrase}`);
   assert.match(files.terms,/AI responses can be incomplete or incorrect/);
   assert.match(files.terms,/not official Ethiopian Ministry of Education material/);
-  assert.match(files.terms,/current deletion control does not delete/);
+  assert.match(files.terms,/permanent deletion flow/);
 });
 
 test("recovery notes describe Replit options without claiming backups are enabled",()=>{

@@ -1,0 +1,25 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedInAs(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    match /users/{uid}/accountData/{recordId} {
+      allow get, list, delete: if signedInAs(uid) && recordId == "backup";
+      allow create, update: if signedInAs(uid)
+        && recordId == "backup"
+        && request.resource.data.keys().hasAll(["schemaVersion", "records", "updatedAt"])
+        && request.resource.data.keys().hasOnly(["schemaVersion", "records", "updatedAt"])
+        && request.resource.data.schemaVersion == 1
+        && request.resource.data.records is map
+        && request.resource.data.records.keys().hasOnly(["conversations", "learning", "preferences"])
+        && request.resource.data.updatedAt is timestamp;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
