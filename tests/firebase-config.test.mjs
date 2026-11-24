@@ -40,6 +40,17 @@ test("Firebase config fails closed when required values are missing or malformed
   assert.equal(createFirebaseWebConfig({ ...validConfig, FIREBASE_APP_ID: "wrong-app-id" }), null);
 });
 
+test("Firebase web configuration rejects a project/auth-domain or app/sender mismatch", () => {
+  assert.equal(
+    createFirebaseWebConfig({ ...validConfig, FIREBASE_AUTH_DOMAIN: "another-project.firebaseapp.com" }),
+    null,
+  );
+  assert.equal(
+    createFirebaseWebConfig({ ...validConfig, FIREBASE_MESSAGING_SENDER_ID: "987654321098" }),
+    null,
+  );
+});
+
 test("Firebase link verification rejects missing tokens before making a provider request", async () => {
   await assert.rejects(
     verifyFirebaseGoogleIdToken("", "mina-teach-ai"),

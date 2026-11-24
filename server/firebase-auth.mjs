@@ -12,18 +12,23 @@ export function createFirebaseWebConfig(env = process.env) {
   const apiKey = value(env, "FIREBASE_WEB_API_KEY");
   const authDomain = value(env, "FIREBASE_AUTH_DOMAIN");
   const appId = value(env, "FIREBASE_APP_ID");
+  const messagingSenderId = value(env, "FIREBASE_MESSAGING_SENDER_ID");
+  const appSenderId = appId.match(/^1:(\d+):web:/)?.[1] || "";
+  const authDomainMatchesProject = !authDomain.toLowerCase().endsWith(".firebaseapp.com")
+    || authDomain.toLowerCase() === `${projectId}.firebaseapp.com`;
 
   if (
     !projectIdPattern.test(projectId) ||
     !apiKey ||
     !/^[a-z0-9.-]+$/i.test(authDomain) ||
-    !/^1:\d+:web:[A-Za-z0-9]+$/.test(appId)
+    !/^1:\d+:web:[A-Za-z0-9]+$/.test(appId) ||
+    !authDomainMatchesProject ||
+    (/^\d{6,20}$/.test(messagingSenderId) && appSenderId !== messagingSenderId)
   ) {
     return null;
   }
 
   const config = { apiKey, authDomain, projectId, appId };
-  const messagingSenderId = value(env, "FIREBASE_MESSAGING_SENDER_ID");
   if (/^\d{6,20}$/.test(messagingSenderId)) config.messagingSenderId = messagingSenderId;
 
   const measurementId = value(env, "FIREBASE_MEASUREMENT_ID");
