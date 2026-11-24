@@ -9,11 +9,13 @@ import {
 import { deleteDoc, doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 
 const projectId = "demo-mina-teach";
+const hasEmulator = Boolean(process.env.FIRESTORE_EMULATOR_HOST);
 let environment;
 
 before(async () => {
+  if (!hasEmulator) return;
   const emulatorAddress = process.env.FIRESTORE_EMULATOR_HOST || "";
-  assert.match(emulatorAddress, /^127\.0\.0\.1:\d+$/, "Run this suite through the Firestore emulator.");
+  assert.match(emulatorAddress, /^(?:127\.0\.0\.1|localhost):\d+$/, "Run this suite through the Firestore emulator.");
   const [host, port] = emulatorAddress.split(":");
   environment = await initializeTestEnvironment({
     projectId,
@@ -29,7 +31,7 @@ after(async () => {
   await environment?.cleanup();
 });
 
-test("a signed-in student can save and read only their own backup", async () => {
+test("a signed-in student can save and read only their own backup", { skip: !hasEmulator }, async () => {
   const database = environment.authenticatedContext("student-a").firestore();
   const reference = doc(database, "users", "student-a", "accountData", "backup");
   await assertSucceeds(setDoc(reference, {
@@ -41,7 +43,7 @@ test("a signed-in student can save and read only their own backup", async () => 
   await assertSucceeds(deleteDoc(reference));
 });
 
-test("unauthenticated and cross-account reads or writes are denied", async () => {
+test("unauthenticated and cross-account reads or writes are denied", { skip: !hasEmulator }, async () => {
   const anonymous = environment.unauthenticatedContext().firestore();
   const studentA = environment.authenticatedContext("student-a").firestore();
   const studentB = environment.authenticatedContext("student-b").firestore();
@@ -68,7 +70,7 @@ test("unauthenticated and cross-account reads or writes are denied", async () =>
   }));
 });
 
-test("only the expected private backup shape and path are writable", async () => {
+test("only the expected private backup shape and path are writable", { skip: !hasEmulator }, async () => {
   const database = environment.authenticatedContext("student-a").firestore();
   await assertFails(setDoc(doc(database, "users", "student-a", "accountData", "backup"), {
     schemaVersion: 1,

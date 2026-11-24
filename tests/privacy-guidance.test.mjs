@@ -56,9 +56,9 @@ test("privacy language matches provider, device-storage, and current notificatio
     "MiniMax service",
     "Google Gemini",
     "Google Search grounding",
-    "device-only downloads and image attachments",
+    "device-only downloads, or local image attachments",
     "Background push notifications are not configured",
-    "The current app code does not include Google Analytics, Firebase Analytics, Firebase Crashlytics, or advertising SDKs",
+    "The current app does not send analytics events",
   ])assert.ok(files.privacy.includes(phrase),`privacy policy includes accurate behavior: ${phrase}`);
   assert.match(files.terms,/AI responses can be incomplete or incorrect/);
   assert.match(files.terms,/not official Ethiopian Ministry of Education material/);

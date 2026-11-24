@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createFirebaseWebConfig } from "../server/firebase-auth.mjs";
+import { createFirebaseWebConfig, verifyFirebaseGoogleIdToken } from "../server/firebase-auth.mjs";
 
 const validConfig = {
   FIREBASE_PROJECT_ID: "mina-teach-ai",
@@ -38,4 +38,11 @@ test("Firebase config fails closed when required values are missing or malformed
   assert.equal(createFirebaseWebConfig({ ...validConfig, FIREBASE_WEB_API_KEY: "" }), null);
   assert.equal(createFirebaseWebConfig({ ...validConfig, FIREBASE_PROJECT_ID: "Mina Teach" }), null);
   assert.equal(createFirebaseWebConfig({ ...validConfig, FIREBASE_APP_ID: "wrong-app-id" }), null);
+});
+
+test("Firebase link verification rejects missing tokens before making a provider request", async () => {
+  await assert.rejects(
+    verifyFirebaseGoogleIdToken("", "mina-teach-ai"),
+    error => error.code === "FIREBASE_TOKEN_INVALID" && error.statusCode === 401,
+  );
 });
