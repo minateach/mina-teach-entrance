@@ -1050,12 +1050,14 @@ function setStatus(state, label, bannerTitle = "", bannerMessage = "") {
 
 async function checkAssistantStatus() {
   setStatus("checking", "Checking tutor");
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 12_000);
   try {
     const response = await fetch("/api/assistant/status", {
       method: "GET",
       headers: { Accept: "application/json" },
       credentials: "same-origin",
-      signal: AbortSignal.timeout(12_000),
+      signal: controller.signal,
     });
     let result;
     try {
@@ -1131,6 +1133,8 @@ async function checkAssistantStatus() {
             ? error.message
             : "The app server could not be reached. Your saved conversations are safe; check your connection and use Check again.",
     );
+  } finally {
+    window.clearTimeout(timeoutId);
   }
   updateSendButton();
 }
