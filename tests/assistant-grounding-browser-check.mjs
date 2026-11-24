@@ -61,7 +61,7 @@ try {
 
   await command("Page.navigate", { url: `${origin}/assistant/` });
   await waitFor('document.readyState==="complete" && document.getElementById("sendButton")');
-  await waitFor('document.getElementById("statusText").textContent==="Gemini key configured"');
+  await waitFor('document.getElementById("statusText").textContent==="Gemini key saved"');
   assert.equal(await evaluate("document.documentElement.scrollWidth<=innerWidth"), true, "assistant fits Android-sized viewport");
 
   await evaluate('document.getElementById("messageInput").value="What is the latest official guidance?";document.getElementById("messageInput").dispatchEvent(new Event("input"));document.getElementById("chatForm").requestSubmit()');

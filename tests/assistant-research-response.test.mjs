@@ -38,6 +38,31 @@ test("research stream signals web search before returning its sourced answer", a
   assert.equal(result.webResearch.sources[0].url, "https://example.gov");
 });
 
+test("research stream can switch to a non-web fallback and clearly label it", async () => {
+  const frames = [
+    "event: status\ndata: {\"state\":\"searching\",\"message\":\"Search the Web\"}\n\n",
+    "event: status\ndata: {\"state\":\"fallback\",\"message\":\"Gemini unavailable; MiniMax is answering without web search.\"}\n\n",
+    "event: result\ndata: {\"answer\":\"A general answer.\",\"provider\":\"minimax\",\"providerNotice\":\"Not web-verified.\",\"webResearch\":{\"searched\":false,\"sources\":[],\"notice\":\"Not web-verified.\"}}\n\n",
+  ];
+  const stream = new ReadableStream({
+    start(controller) {
+      const encoder = new TextEncoder();
+      frames.forEach(frame => controller.enqueue(encoder.encode(frame)));
+      controller.close();
+    },
+  });
+  const progress = [];
+  const result = await readAssistantResearchResponse(
+    new Response(stream, { headers: { "Content-Type": "text/event-stream" } }),
+    state => progress.push(state.state),
+  );
+  assert.deepEqual(progress, ["searching", "fallback"]);
+  assert.equal(result.provider, "minimax");
+  assert.equal(result.webResearch.searched, false);
+  assert.deepEqual(result.webResearch.sources, []);
+  assert.match(result.providerNotice, /Not web-verified/);
+});
+
 test("streamed provider failures remain explicit and never become answers", async () => {
   const body = `event: status\ndata: {"state":"searching","message":"Search the Web"}\n\n` +
     `event: error\ndata: {"error":{"code":"GEMINI_GROUNDING_UNAVAILABLE","message":"Google Search is unavailable."}}\n\n`;

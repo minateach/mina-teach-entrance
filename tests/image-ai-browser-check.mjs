@@ -66,7 +66,7 @@ try {
 
   await command("Page.navigate", { url: `${origin}/assistant/` });
   await waitFor('document.readyState==="complete" && document.getElementById("galleryInput")');
-  await waitFor('document.getElementById("statusText").textContent==="Gemini key configured"');
+  await waitFor('document.getElementById("statusText").textContent==="Gemini key saved"');
   assert.equal(await evaluate("document.documentElement.scrollWidth<=innerWidth"), true, "assistant fits a phone viewport");
 
   await setFile("#galleryInput");

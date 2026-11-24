@@ -1054,8 +1054,15 @@ async function checkAssistantStatus() {
     const response = await fetch("/api/assistant/status", {
       method: "GET",
       headers: { Accept: "application/json" },
+      credentials: "same-origin",
+      signal: AbortSignal.timeout(12_000),
     });
-    const result = await response.json();
+    let result;
+    try {
+      result = await response.json();
+    } catch {
+      throw new Error("The tutor status service returned an unreadable response.");
+    }
     if (!response.ok) {
       throw new Error(result?.error?.message || "We could not check the tutor right now.");
     }
@@ -1115,10 +1122,14 @@ async function checkAssistantStatus() {
     setStatus(
       "error",
       "Status unavailable",
-      navigator.onLine ? "Could not check tutor status" : "AI Tutor needs internet",
-      navigator.onLine
-        ? error.message || "Please check your connection. You can try sending a question again."
-        : "The AI Tutor works online only. Your saved conversations remain on this device; reconnect to send a question."
+      navigator.onLine ? "Could not reach the tutor service" : "AI Tutor needs internet",
+      !navigator.onLine
+        ? "The AI Tutor works online only. Your saved conversations remain on this device; reconnect to send a question."
+        : error?.name === "TimeoutError" || error?.name === "AbortError"
+          ? "The status check timed out. Your saved conversations are safe; use Check again or try sending your question."
+          : error?.message === "The tutor status service returned an unreadable response."
+            ? error.message
+            : "The app server could not be reached. Your saved conversations are safe; check your connection and use Check again.",
     );
   }
   updateSendButton();
