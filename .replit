@@ -42,3 +42,8 @@ timeoutMs = 180000
 deploymentTarget = "autoscale"
 run = ["node", "server.mjs"]
 build = ["npm", "run", "build:account"]
+
+[userenv]
+
+[userenv.shared]
+FIREBASE_PROJECT_ID = "mina-teach-ai"
