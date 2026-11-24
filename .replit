@@ -1,7 +1,8 @@
-modules = ["web", "python-base-3.13", "nodejs-24", "postgresql-16"]
+modules = ["web", "python-base-3.13", "nodejs-24", "postgresql-16", "java-graalvm22.3"]
 
 [nix]
 channel = "stable-25_05"
+packages = ["jdk21"]
 
 [agent]
 expertMode = true
