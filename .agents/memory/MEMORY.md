@@ -4,3 +4,4 @@
 - [Learning content integrity](learning-content-integrity.md) — preserve every available material; delivery audits do not prove full textbook coverage, and completion follows accessed content.
 - [Android wrapper and sign-in](android-twa.md) — use a Trusted Web Activity for Android so Clerk sign-in stays in Chrome; verified fullscreen requires the Play signing fingerprint.
 - [Firebase identity migration safety](firebase-identity-migration.md) — keep Firebase additive until a tested, approved migration preserves existing account identities and data.
+- [AI provider fallback integrity](ai-provider-fallback.md) — name the real fallback provider and never imply web verification or image analysis that did not occur.

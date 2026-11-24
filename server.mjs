@@ -673,6 +673,10 @@ async function handleAssistantChat(request, response) {
       sendAssistantFallback(response, payload, streamStarted, "Gemini is unavailable; MiniMax is answering without web search.");
       return { attempted: true, answered: true };
     } catch (error) {
+      console.warn("[assistant] MiniMax fallback request failed.", {
+        code: error?.code || "MINIMAX_UNAVAILABLE",
+        httpStatus: Number(error?.statusCode) || null,
+      });
       return { attempted: true, answered: false, error };
     }
   };

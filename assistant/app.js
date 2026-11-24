@@ -1087,7 +1087,14 @@ async function checkAssistantStatus() {
           : "",
       );
     } else if (geminiKeyReady && geminiConnection === "available") {
-      setStatus("ready", "Gemini connected");
+      setStatus(
+        "ready",
+        "Gemini connected",
+        result.minimaxConfigured === false ? "MiniMax needs attention" : "",
+        result.minimaxConfigured === false
+          ? result.message || "Gemini is answering; MiniMax is not connected."
+          : "",
+      );
     } else if (geminiKeyReady && geminiConnection === "unavailable") {
       setStatus(
         "error",
@@ -1099,8 +1106,10 @@ async function checkAssistantStatus() {
       setStatus(
         "ready",
         "Gemini key saved",
-        "Connection not yet verified",
-        "Gemini has not completed a successful request in this session. A failed question remains saved and can be retried.",
+        result.minimaxConfigured === false ? "MiniMax needs attention" : "Connection not yet verified",
+        result.minimaxConfigured === false
+          ? result.message || "Gemini has not completed a successful request in this session; MiniMax also needs attention."
+          : "Gemini has not completed a successful request in this session. A failed question remains saved and can be retried.",
       );
     } else if (providerConfigured) {
       setStatus("ready", "AI provider configured");

@@ -92,8 +92,19 @@ try {
   assert.equal(await evaluate('document.querySelector(".provider-badge").textContent'), "MiniMax fallback");
   assert.match(await evaluate('document.querySelector(".message-research").textContent'), /No web search was performed/);
   assert.equal(await evaluate('document.getElementById("statusText").textContent'), "MiniMax fallback");
+
+  await command("Network.emulateNetworkConditions", {
+    offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0,
+  });
+  await waitFor('navigator.onLine===false && document.getElementById("statusText").textContent==="Offline"');
+  assert.match(await evaluate('document.getElementById("statusBanner").textContent'), /saved conversations remain on this device/);
+  await command("Network.emulateNetworkConditions", {
+    offline: false, latency: 0, downloadThroughput: 10_000_000, uploadThroughput: 10_000_000,
+  });
+  await waitFor('navigator.onLine===true && document.getElementById("statusText").textContent==="MiniMax connected"');
+  assert.equal(statusRequests, 3, "reconnecting rechecked the live status endpoint");
   assert.deepEqual(browser.exceptions, []);
-  console.log("PASS: status failure is understandable, Check again repeats the request, chat loading/error/success states work, and Try again resends without losing or duplicating the question.");
+  console.log("PASS: status failure and Check again, saved chat retry, fallback success, and offline/online status recovery work.");
 } finally {
   await browser.stopIntercept().catch(() => {});
   await browser.close();

@@ -92,6 +92,7 @@ test("current-source and image requests use Gemini; ordinary multilingual text u
 test("Gemini service failures can fall back to MiniMax only for available text requests", () => {
   assert.equal(shouldFallbackGeminiToMiniMax("GEMINI_TEMPORARILY_UNAVAILABLE", { miniMaxAvailable: true }), true);
   assert.equal(shouldFallbackGeminiToMiniMax("GEMINI_GROUNDING_LIMIT", { miniMaxAvailable: true }), true);
+  assert.equal(shouldFallbackGeminiToMiniMax("SETUP_REQUIRED", { miniMaxAvailable: true }), true);
   assert.equal(shouldFallbackGeminiToMiniMax("GEMINI_PROMPT_BLOCKED", { miniMaxAvailable: true }), false);
   assert.equal(shouldFallbackGeminiToMiniMax("GEMINI_TEMPORARILY_UNAVAILABLE", { hasImage: true, miniMaxAvailable: true }), false);
   assert.equal(shouldFallbackGeminiToMiniMax("GEMINI_TEMPORARILY_UNAVAILABLE", { miniMaxAvailable: false }), false);
