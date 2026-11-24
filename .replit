@@ -47,3 +47,7 @@ build = ["npm", "run", "build:account"]
 
 [userenv.shared]
 FIREBASE_PROJECT_ID = "mina-teach-ai"
+FIREBASE_AUTH_DOMAIN = "mina-teach-ai.firebaseapp.com"
+FIREBASE_APP_ID = "1:136694073512:web:fecd1fb1ea4d183067da9d"
+FIREBASE_MESSAGING_SENDER_ID = "Kanuma beekaa"
+FIREBASE_MEASUREMENT_ID = "Hin argane"
