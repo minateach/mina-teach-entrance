@@ -6,13 +6,16 @@ import { Redirect, Route, Router as WouterRouter, Switch, useLocation } from "wo
 import { shadcn } from "@clerk/themes";
 import "./firebase.css";
 import { getApps, initializeApp } from "firebase/app";
+import { firebaseGoogleErrorMessage, shouldUseFirebaseRedirectFallback } from "./firebase-errors.mjs";
 import {
   GoogleAuthProvider,
   deleteUser,
   getAuth,
+  getRedirectResult,
   onAuthStateChanged,
   reauthenticateWithPopup,
   signInWithPopup,
+  signInWithRedirect,
 } from "firebase/auth";
 import { deleteDoc, doc, getFirestore, serverTimestamp, setDoc } from "firebase/firestore";
 import { clearOfflineOwner } from "../../learning/offline-store.js";
@@ -70,6 +73,14 @@ function AccountPage() {
     if (!response.ok) throw new Error(body?.error?.message || "Account request failed.");
     return body;
   };
+  const completeFirebaseGoogleLink = async credential => {
+    if (!credential?.user) return;
+    const idToken = await credential.user.getIdToken();
+    const link = await request("/api/account/firebase-link", { method: "POST", body: JSON.stringify({ idToken }) });
+    setFirebaseUser(credential.user);
+    setFirebaseLink({ loading: false, linked: true, firebaseUid: link.firebaseUid });
+    setFirebaseNotice("Google Sign-In is linked to this Mina Teach account. Clerk remains the current app sign-in.");
+  };
   React.useEffect(() => {
     if (!isLoaded || !user) return;
     setProfileName(user.fullName || "");
@@ -100,6 +111,12 @@ function AccountPage() {
         setFirebaseClient({ status: "ready", auth, firestore, capabilities: result.capabilities });
         stopListening = onAuthStateChanged(auth, currentUser => {
           if (active) setFirebaseUser(currentUser);
+        });
+        void getRedirectResult(auth).then(async credential => {
+          if (active && credential) await completeFirebaseGoogleLink(credential);
+        }).catch(error => {
+          console.warn("[firebase] Google redirect sign-in failed.", { code: error?.code || "unknown" });
+          if (active) setFirebaseNotice(firebaseGoogleErrorMessage(error, window.location.hostname));
         });
       } catch (error) {
         if (active) setFirebaseClient({ status: "unavailable", auth: null, firestore: null, capabilities: null, message: error.message });
@@ -142,17 +159,25 @@ function AccountPage() {
     }
     setBusy(true); setFirebaseNotice("");
     try {
-      const credential = await signInWithPopup(firebaseClient.auth, new GoogleAuthProvider());
-      const idToken = await credential.user.getIdToken();
-      const link = await request("/api/account/firebase-link", { method: "POST", body: JSON.stringify({ idToken }) });
-      setFirebaseUser(credential.user);
-      setFirebaseLink({ loading: false, linked: true, firebaseUid: link.firebaseUid });
-      setFirebaseNotice("Google Sign-In is linked to this Mina Teach account. Clerk remains the current app sign-in.");
+      const provider = new GoogleAuthProvider();
+      let credential;
+      try {
+        credential = await signInWithPopup(firebaseClient.auth, provider);
+      } catch (error) {
+        console.warn("[firebase] Google sign-in popup failed.", { code: error?.code || "unknown" });
+        if (!shouldUseFirebaseRedirectFallback(error)) throw error;
+        if (window.top !== window.self) {
+          setFirebaseNotice(firebaseGoogleErrorMessage(error, window.location.hostname));
+          return;
+        }
+        setFirebaseNotice("The sign-in popup was blocked. Continuing with Google’s secure redirect flow…");
+        await signInWithRedirect(firebaseClient.auth, provider);
+        return;
+      }
+      await completeFirebaseGoogleLink(credential);
     } catch (error) {
-      const message = error.code === "auth/operation-not-allowed"
-        ? "Enable Google as a sign-in provider in Firebase Authentication, then retry."
-        : error.message;
-      setFirebaseNotice(message || "Google Sign-In could not be linked. Please retry.");
+      console.warn("[firebase] Google sign-in failed.", { code: error?.code || "unknown" });
+      setFirebaseNotice(firebaseGoogleErrorMessage(error, window.location.hostname));
     } finally { setBusy(false); }
   };
   const saveFirebaseBackup = async () => {
@@ -260,7 +285,7 @@ function AccountPage() {
         <p className="eyebrow">FIREBASE</p><h2 id="firebase-heading">Google Sign-In and private backup</h2>
         <p className="muted">Link a Google identity to this existing Mina Teach account. Your current Clerk sign-in and PostgreSQL records remain in place; accounts are never merged by email.</p>
         {firebaseClient.status === "loading" && <p className="status" role="status">Checking Firebase setup…</p>}
-        {firebaseClient.status === "unavailable" && <p className="status" role="status">Firebase setup is incomplete. Existing account features continue to use the current sign-in.</p>}
+        {firebaseClient.status === "unavailable" && <p className="status" role="status">{firebaseClient.message || "Firebase setup is incomplete. Existing account features continue to use the current sign-in."}</p>}
         {firebaseClient.status === "ready" && <>
           <p className="status" role="status">{firebaseLink.loading ? "Checking linked Google account…" : firebaseLink.linked ? "A Google identity is linked to this account." : "No Google identity is linked yet."}</p>
           <div className="actions">
