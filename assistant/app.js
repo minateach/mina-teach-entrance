@@ -624,7 +624,9 @@ function createMessageNode(message) {
   if (message.role === "assistant" && ["minimax", "gemini"].includes(message.provider)) {
     const provider = document.createElement("span");
     provider.className = "provider-badge";
-    provider.textContent = message.providerNotice ? "Gemini fallback" : message.provider === "minimax" ? "MiniMax" : "Gemini";
+    provider.textContent = message.providerNotice
+      ? `${message.provider === "minimax" ? "MiniMax" : "Gemini"} fallback`
+      : message.provider === "minimax" ? "MiniMax" : "Gemini";
     contentWrap.append(provider);
   }
   if (message.role === "assistant" && message.offlineAI === true) {
@@ -1261,9 +1263,14 @@ async function sendMessage(rawMessage, isRetry = false) {
         ...(imageDataUrl ? { imageDataUrl } : {}),
       }),
     });
-    const result = await readAssistantResearchResponse(response, () => {
-      researchInProgress = true;
-      setStatus("searching", "Search the Web");
+    const result = await readAssistantResearchResponse(response, state => {
+      if (state.state === "fallback") {
+        researchInProgress = false;
+        setStatus("checking", "Provider fallback", "Gemini unavailable", state.message || "Using the other configured provider without web search.");
+      } else {
+        researchInProgress = true;
+        setStatus("searching", "Search the Web");
+      }
       renderConversation();
     });
     if (typeof result.answer !== "string") {
@@ -1333,7 +1340,7 @@ async function sendMessage(rawMessage, isRetry = false) {
     retryMessage = "";
     if (result.answer) {
       if (result.providerNotice) {
-        setStatus("error", "Gemini fallback", "MiniMax connection unavailable", result.providerNotice);
+        setStatus("ready", `${result.provider === "minimax" ? "MiniMax" : "Gemini"} fallback`, "Provider switched", result.providerNotice);
       } else {
         setStatus("ready", result.provider === "minimax" ? "MiniMax answered" : "Tutor ready");
       }

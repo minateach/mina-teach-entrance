@@ -14,8 +14,8 @@ function dispatchFrame(frame, { onResearch, state }) {
   let payload;
   try { payload = JSON.parse(data); }
   catch { return; }
-  if (event === "status" && payload.state === "searching") {
-    state.researchStarted = true;
+  if (event === "status" && ["searching", "fallback"].includes(payload.state)) {
+    if (payload.state === "searching") state.researchStarted = true;
     onResearch?.(payload);
   } else if (event === "result") {
     state.result = payload;
