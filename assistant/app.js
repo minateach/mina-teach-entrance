@@ -1531,5 +1531,18 @@ renderStorageNote();
 renderConversation();
 renderMemoryList();
 updateSendButton();
+window.addEventListener("offline", () => {
+  setStatus(
+    "error",
+    "Offline",
+    "Internet connection unavailable",
+    "Your saved conversations remain on this device. Reconnect to use the online AI Tutor.",
+  );
+  updateSendButton();
+});
+window.addEventListener("online", () => {
+  setStatus("checking", "Checking tutor");
+  void checkAssistantStatus();
+});
 void checkAssistantStatus();
 void syncAccountConversations();

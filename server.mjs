@@ -1059,6 +1059,18 @@ async function refreshMiniMaxStatus(force = false) {
 async function handleAssistantStatus(response) {
   await refreshMiniMaxStatus();
   const geminiConfigured = Boolean(process.env.GEMINI_API_KEY?.trim());
+  let message;
+  if (miniMaxStatusCache.configured) {
+    message = geminiStatusCache.available === false
+      ? `MiniMax connection verified for ${miniMaxChatModel}. Gemini's last request failed (${geminiStatusCache.code}); current web research and image analysis may be unavailable.`
+      : `MiniMax connection verified for ${miniMaxChatModel}. Gemini is ${publicGeminiConnectionState(geminiConfigured)}.`;
+  } else if (geminiConfigured && geminiStatusCache.available === false) {
+    message = `Both configured providers need attention: MiniMax (${miniMaxStatusCache.code || "unavailable"}); Gemini (${geminiStatusCache.code}).`;
+  } else {
+    message = miniMaxStatusCache.message || (geminiConfigured
+      ? `MiniMax needs attention. Gemini is configured but ${publicGeminiConnectionState(geminiConfigured)}.`
+      : geminiSetupMessage);
+  }
   sendJson(response, 200, {
     provider: "minimax",
     configured: miniMaxStatusCache.configured || geminiConfigured,
@@ -1073,15 +1085,7 @@ async function handleAssistantStatus(response) {
     geminiLastErrorCode: geminiStatusCache.code || null,
     googleSearchGrounding: "enabled-when-available",
     monthlyGroundedRequestCap: monthlyGroundingRequestCap,
-    message: miniMaxStatusCache.configured
-      ? geminiStatusCache.available === false
-        ? `MiniMax connection verified for ${miniMaxChatModel}. Gemini's last request failed (${geminiStatusCache.code}); current web research and image analysis may be unavailable.`
-        : `MiniMax connection verified for ${miniMaxChatModel}. Gemini is ${publicGeminiConnectionState(geminiConfigured)}.`
-      : miniMaxStatusCache.message || (geminiConfigured
-        ? geminiStatusCache.available === false
-          ? `Both configured providers need attention: MiniMax (${miniMaxStatusCache.code || "unavailable"}); Gemini (${geminiStatusCache.code}).`
-          : `MiniMax needs attention. Gemini is configured but ${publicGeminiConnectionState(geminiConfigured)}.`
-        : geminiSetupMessage),
+    message,
   });
 }
 
