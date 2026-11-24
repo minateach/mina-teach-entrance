@@ -2,9 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   defaultMiniMaxChatModel,
+  createMiniMaxFallbackPayload,
   normalizeMiniMaxChatError,
   normalizeStudentMemory,
   requestMiniMaxChat,
+  shouldFallbackGeminiToMiniMax,
   shouldUseGeminiForRequest,
 } from "../server/minimax-chat.mjs";
 
@@ -85,6 +87,27 @@ test("current-source and image requests use Gemini; ordinary multilingual text u
   assert.equal(shouldUseGeminiForRequest("አልጀብራን አስረዳኝ"), false);
   assert.equal(shouldUseGeminiForRequest("Naaf, seera Newton ibsi."), false);
   assert.equal(shouldUseGeminiForRequest("Describe this diagram.", true), true);
+});
+
+test("Gemini service failures can fall back to MiniMax only for available text requests", () => {
+  assert.equal(shouldFallbackGeminiToMiniMax("GEMINI_TEMPORARILY_UNAVAILABLE", { miniMaxAvailable: true }), true);
+  assert.equal(shouldFallbackGeminiToMiniMax("GEMINI_GROUNDING_LIMIT", { miniMaxAvailable: true }), true);
+  assert.equal(shouldFallbackGeminiToMiniMax("GEMINI_PROMPT_BLOCKED", { miniMaxAvailable: true }), false);
+  assert.equal(shouldFallbackGeminiToMiniMax("GEMINI_TEMPORARILY_UNAVAILABLE", { hasImage: true, miniMaxAvailable: true }), false);
+  assert.equal(shouldFallbackGeminiToMiniMax("GEMINI_TEMPORARILY_UNAVAILABLE", { miniMaxAvailable: false }), false);
+});
+
+test("MiniMax fallback metadata never claims web search or invents citations", () => {
+  const payload = createMiniMaxFallbackPayload({
+    answer: "A real model answer.",
+    notice: "Gemini was unavailable; this answer was not checked against current web sources.",
+  });
+  assert.equal(payload.answer, "A real model answer.");
+  assert.equal(payload.provider, "minimax");
+  assert.equal(payload.webResearch.searched, false);
+  assert.deepEqual(payload.webResearch.sources, []);
+  assert.match(payload.providerNotice, /not checked against current web sources/);
+  assert.throws(() => createMiniMaxFallbackPayload({ answer: "   " }), /real MiniMax answer/);
 });
 
 test("saved memory is size-limited and contains only explicit text notes", () => {

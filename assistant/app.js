@@ -1063,21 +1063,36 @@ async function checkAssistantStatus() {
         ? false
         : null;
     const miniMaxReady = result.minimaxConfigured === true;
-    const geminiReady = result.geminiConfigured === true || result.provider === "gemini" && result.configured === true;
-    geminiConfigured = geminiReady;
+    const geminiKeyReady = result.geminiConfigured === true || result.provider === "gemini" && result.configured === true;
+    const geminiConnection = result.geminiConnection || (geminiKeyReady ? "not_tested" : "not_configured");
+    geminiConfigured = geminiKeyReady;
     if (miniMaxReady) {
-      setStatus("ready", "MiniMax connected");
-    } else if (result.provider === "gemini" && result.minimaxConfigured === undefined && geminiReady) {
-      setStatus("ready", "Gemini key configured");
-    } else if (geminiReady) {
+      setStatus(
+        "ready",
+        "MiniMax connected",
+        geminiConnection === "unavailable" ? "Gemini temporarily unavailable" : "",
+        geminiConnection === "unavailable"
+          ? "General tutoring can continue with MiniMax. Current web search and image analysis may be unavailable until Gemini recovers."
+          : "",
+      );
+    } else if (geminiKeyReady && geminiConnection === "available") {
+      setStatus("ready", "Gemini connected");
+    } else if (geminiKeyReady && geminiConnection === "unavailable") {
       setStatus(
         "error",
-        "MiniMax needs attention",
-        "Text tutor connection unavailable",
-        result.message || "Gemini remains available for current web research and image analysis. General text answers require a working MiniMax connection."
+        "AI providers need attention",
+        "Gemini did not connect",
+        result.message || "Gemini's last request failed and MiniMax is not connected. Your study conversations remain saved; reconnect a provider and try again.",
+      );
+    } else if (geminiKeyReady) {
+      setStatus(
+        "ready",
+        "Gemini key saved",
+        "Connection not yet verified",
+        "Gemini has not completed a successful request in this session. A failed question remains saved and can be retried.",
       );
     } else if (providerConfigured) {
-      setStatus("ready", "Gemini key configured");
+      setStatus("ready", "AI provider configured");
     } else if (providerConfigured === false) {
       setStatus(
         "missing",

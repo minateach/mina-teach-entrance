@@ -1,5 +1,46 @@
 export const defaultMiniMaxChatModel = "MiniMax-M3.1-Flash";
 
+const geminiFallbackCodes = new Set([
+  "GEMINI_SETUP_REQUIRED",
+  "GEMINI_ACCESS_DENIED",
+  "GEMINI_RATE_LIMIT",
+  "GEMINI_GROUNDING_LIMIT",
+  "GEMINI_GROUNDING_UNAVAILABLE",
+  "GEMINI_GROUNDING_REJECTED",
+  "GEMINI_MODEL_UNAVAILABLE",
+  "GEMINI_TEMPORARILY_UNAVAILABLE",
+  "GEMINI_UNAVAILABLE",
+  "EMPTY_GEMINI_RESPONSE",
+  "TUTOR_TIMEOUT",
+  "TUTOR_UNAVAILABLE",
+]);
+
+export function shouldFallbackGeminiToMiniMax(errorCode, { hasImage = false, miniMaxAvailable = false } = {}) {
+  return !hasImage && miniMaxAvailable && geminiFallbackCodes.has(errorCode);
+}
+
+export function createMiniMaxFallbackPayload({ answer, notice, knowledgeCenter, privateKnowledge }) {
+  if (typeof answer !== "string" || !answer.trim()) {
+    throw new TypeError("A real MiniMax answer is required for fallback.");
+  }
+  const fallbackNotice = typeof notice === "string" && notice.trim()
+    ? notice.trim().slice(0, 400)
+    : "Gemini was unavailable. MiniMax answered without web search; current information is not verified.";
+  return {
+    answer: answer.trim(),
+    provider: "minimax",
+    providerNotice: fallbackNotice,
+    webResearch: {
+      searched: false,
+      sourceCount: 0,
+      sources: [],
+      notice: fallbackNotice,
+    },
+    ...(privateKnowledge ? { privateKnowledge } : {}),
+    ...(knowledgeCenter ? { knowledgeCenter } : {}),
+  };
+}
+
 export function normalizeMiniMaxChatError(response, body) {
   const code = Number(body?.base_resp?.status_code || body?.error?.code);
   const message = String(body?.base_resp?.status_msg || body?.error?.message || "").toLowerCase();

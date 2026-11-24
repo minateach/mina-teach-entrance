@@ -26,10 +26,12 @@ import {
   updateStudyNotifications,
 } from "./server/study-notifications.mjs";
 import {
+  createMiniMaxFallbackPayload,
   defaultMiniMaxChatModel,
   normalizeMiniMaxChatError,
   normalizeStudentMemory,
   requestMiniMaxChat,
+  shouldFallbackGeminiToMiniMax,
   shouldUseGeminiForRequest,
 } from "./server/minimax-chat.mjs";
 import {
@@ -84,7 +86,21 @@ const geminiModel = "gemini-3.5-flash-lite";
 const miniMaxChatModel = process.env.MINIMAX_MODEL?.trim() || defaultMiniMaxChatModel;
 const geminiSetupMessage =
   "Gemini is not configured. Add GEMINI_API_KEY in Replit Secrets using a Google AI Studio API key. No API key or paid plan was changed by Mina Teach AI.";
-const miniMaxStatusCache = { checkedAt: 0, configured: false, message: "" };
+const miniMaxStatusCache = { checkedAt: 0, configured: false, code: "", message: "" };
+const geminiStatusCache = { checkedAt: 0, available: null, code: "" };
+
+function recordGeminiStatus(available, code = "") {
+  geminiStatusCache.checkedAt = Date.now();
+  geminiStatusCache.available = available;
+  geminiStatusCache.code = available ? "" : code || "GEMINI_UNAVAILABLE";
+}
+
+function publicGeminiConnectionState(configured) {
+  if (!configured) return "not_configured";
+  if (geminiStatusCache.available === true) return "available";
+  if (geminiStatusCache.available === false) return "unavailable";
+  return "not_tested";
+}
 
 function getLegacyInlineHashes(html) {
   const hash = value => `'sha256-${createHash("sha256").update(value).digest("base64")}'`;
@@ -143,6 +159,29 @@ function finishResearchError(response, statusCode, code, message, streamStarted)
   } else {
     sendError(response, statusCode, code, message);
   }
+}
+
+function sendAssistantFallback(response, payload, streamStarted, statusMessage) {
+  if (streamStarted) {
+    writeResearchEvent(response, "status", { state: "fallback", message: statusMessage });
+    writeResearchEvent(response, "result", payload);
+    if (!response.writableEnded) response.end();
+    return;
+  }
+  sendJson(response, 200, payload);
+}
+
+function dualProviderFailureMessage(error) {
+  if (error?.code === "MINIMAX_SETUP_REQUIRED") {
+    return "Gemini could not answer, and the MiniMax connection needs attention. Your message is saved; reconnect MiniMax in Replit Integrations and try again. No answer was generated.";
+  }
+  if (error?.code === "MINIMAX_BILLING_REQUIRED") {
+    return "Gemini could not answer, and MiniMax reports no available API balance. No credits were added; your message is saved and no answer was generated.";
+  }
+  if (error?.code === "MINIMAX_RATE_LIMIT") {
+    return "Gemini and MiniMax are currently unavailable or rate-limited. Your message is saved; try again later. No answer was generated.";
+  }
+  return "Gemini and MiniMax could not answer this question. Your message is saved; check the provider connection and try again. No answer was generated.";
 }
 
 async function readJsonBody(request, bodyLimit = maxBodyBytes) {
@@ -375,37 +414,45 @@ async function requestGeminiTextFallback({ apiKey, grade, language, message, his
     })),
     { role: "user", parts: [{ text: message }] },
   ];
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-      body: JSON.stringify({
-        systemInstruction: {
-          parts: [{
-            text: buildTutorInstructions(
-              language,
-              grade,
-              false,
-              "MiniMax is unavailable, and no web search was performed for this fallback answer.",
-              false,
-              studentMemory,
-              founderProfile,
-            ),
-          }],
-        },
-        contents,
-        generationConfig: { temperature: 0.35, maxOutputTokens: 768 },
-      }),
-      signal: AbortSignal.timeout(45_000),
-    },
-  );
+  let response;
+  try {
+    response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+        body: JSON.stringify({
+          systemInstruction: {
+            parts: [{
+              text: buildTutorInstructions(
+                language,
+                grade,
+                false,
+                "MiniMax is unavailable, and no web search was performed for this fallback answer.",
+                false,
+                studentMemory,
+                founderProfile,
+              ),
+            }],
+          },
+          contents,
+          generationConfig: { temperature: 0.35, maxOutputTokens: 768 },
+        }),
+        signal: AbortSignal.timeout(45_000),
+      },
+    );
+  } catch (error) {
+    recordGeminiStatus(false, error?.name === "TimeoutError" ? "TUTOR_TIMEOUT" : "TUTOR_UNAVAILABLE");
+    throw error;
+  }
   const body = await response.json().catch(() => null);
   if (!response.ok) {
     const failure = normalizeGeminiError(response, body, false);
+    recordGeminiStatus(false, failure.code);
     throw Object.assign(new Error(failure.message), failure);
   }
   if (body?.promptFeedback?.blockReason) {
+    recordGeminiStatus(true);
     throw Object.assign(new Error("Gemini could not answer this prompt under its safety rules."), {
       statusCode: 422,
       code: "GEMINI_PROMPT_BLOCKED",
@@ -413,11 +460,13 @@ async function requestGeminiTextFallback({ apiKey, grade, language, message, his
   }
   const answer = getGeminiAnswerText(body);
   if (!answer) {
+    recordGeminiStatus(false, "EMPTY_GEMINI_RESPONSE");
     throw Object.assign(new Error("Gemini returned no answer."), {
       statusCode: 502,
       code: "EMPTY_GEMINI_RESPONSE",
     });
   }
+  recordGeminiStatus(true);
   return answer;
 }
 
@@ -570,25 +619,86 @@ async function handleAssistantChat(request, response) {
 
   const studentMemory = normalizeStudentMemory(input.studentMemory);
   const useGemini = shouldUseGeminiForRequest(message, Boolean(imageInput));
+  const makeMiniMaxMessages = (systemNotice) => [
+    {
+      role: "system",
+      content: buildTutorInstructions(
+        language,
+        grade,
+        false,
+        systemNotice,
+        false,
+        studentMemory,
+        founderProfile,
+      ),
+    },
+    ...cleanHistory(input.history).map(item => ({ role: item.role, content: item.content })),
+    { role: "user", content: messageWithKnowledge },
+  ];
+  const tryMiniMaxFallback = async (errorCode, streamStarted = false) => {
+    if (!shouldFallbackGeminiToMiniMax(errorCode, {
+      hasImage: Boolean(imageInput),
+      miniMaxAvailable: true,
+    })) return { attempted: false, answered: false };
+
+    const status = await refreshMiniMaxStatus(true);
+    if (!status.configured) {
+      return {
+        attempted: true,
+        answered: false,
+        error: Object.assign(new Error(status.message || "MiniMax is not connected."), {
+          code: status.code || "MINIMAX_SETUP_REQUIRED",
+        }),
+      };
+    }
+    try {
+      const result = await requestMiniMaxChat(
+        minimaxConnectors,
+        makeMiniMaxMessages("Gemini could not complete the current-information request. No web search was performed. Say when current facts cannot be verified, and do not invent or cite web sources."),
+        miniMaxChatModel,
+      );
+      miniMaxStatusCache.checkedAt = Date.now();
+      miniMaxStatusCache.configured = true;
+      miniMaxStatusCache.code = "";
+      miniMaxStatusCache.message = "";
+      const notice = "Gemini could not complete a web search. MiniMax answered from general model knowledge; this answer is not web-verified and may not reflect current information.";
+      const payload = createMiniMaxFallbackPayload({
+        answer: result.answer,
+        notice,
+        knowledgeCenter: sharedKnowledgeInfo,
+        privateKnowledge: personalKnowledgeResult,
+      });
+      payload.model = result.model;
+      if (result.usage) payload.usage = result.usage;
+      sendAssistantFallback(response, payload, streamStarted, "Gemini is unavailable; MiniMax is answering without web search.");
+      return { attempted: true, answered: true };
+    } catch (error) {
+      return { attempted: true, answered: false, error };
+    }
+  };
+  const settleGeminiFailure = async (failure, streamStarted = false) => {
+    const fallback = await tryMiniMaxFallback(failure.code, streamStarted);
+    if (fallback.answered) return true;
+    if (fallback.attempted) {
+      finishResearchError(
+        response,
+        503,
+        "DUAL_PROVIDER_UNAVAILABLE",
+        dualProviderFailureMessage(fallback.error),
+        streamStarted,
+      );
+      return true;
+    }
+    return false;
+  };
   if (!useGemini) {
-    const messages = [
-      {
-        role: "system",
-        content: buildTutorInstructions(
-          language,
-          grade,
-          false,
-          "No web search was performed. Do not claim to have checked current sources.",
-          false,
-          studentMemory,
-          founderProfile,
-        ),
-      },
-      ...cleanHistory(input.history).map(item => ({ role: item.role, content: item.content })),
-      { role: "user", content: messageWithKnowledge },
-    ];
+    const messages = makeMiniMaxMessages("No web search was performed. Do not claim to have checked current sources.");
     try {
       const result = await requestMiniMaxChat(minimaxConnectors, messages, miniMaxChatModel);
+      miniMaxStatusCache.checkedAt = Date.now();
+      miniMaxStatusCache.configured = true;
+      miniMaxStatusCache.code = "";
+      miniMaxStatusCache.message = "";
       sendJson(response, 200, {
         answer: result.answer,
         provider: "minimax",
@@ -611,7 +721,7 @@ async function handleAssistantChat(request, response) {
         httpStatus: Number(error?.statusCode) || null,
       });
       if (
-        ["MINIMAX_SETUP_REQUIRED", "MINIMAX_UNAVAILABLE"].includes(error?.code) &&
+        ["MINIMAX_SETUP_REQUIRED", "MINIMAX_UNAVAILABLE", "MINIMAX_MODEL_UNAVAILABLE", "MINIMAX_RATE_LIMIT", "MINIMAX_EMPTY_RESPONSE"].includes(error?.code) &&
         process.env.GEMINI_API_KEY?.trim()
       ) {
         try {
@@ -638,6 +748,12 @@ async function handleAssistantChat(request, response) {
             ...(personalKnowledgeResult ? { privateKnowledge: personalKnowledgeResult } : {}),
             knowledgeCenter: sharedKnowledgeInfo,
           });
+          miniMaxStatusCache.checkedAt = Date.now();
+          if (error?.code === "MINIMAX_SETUP_REQUIRED" || error?.code === "MINIMAX_UNAVAILABLE") {
+            miniMaxStatusCache.configured = false;
+            miniMaxStatusCache.code = error.code;
+            miniMaxStatusCache.message = error.message;
+          }
           return;
         } catch (fallbackError) {
           console.warn("[assistant] Gemini text fallback failed.", {
@@ -665,7 +781,21 @@ async function handleAssistantChat(request, response) {
 
   const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) {
-    sendError(response, 503, "GEMINI_SETUP_REQUIRED", geminiSetupMessage);
+    recordGeminiStatus(false, "GEMINI_SETUP_REQUIRED");
+    const fallback = await tryMiniMaxFallback("GEMINI_SETUP_REQUIRED");
+    if (fallback.answered) return;
+    if (fallback.attempted) {
+      sendError(response, 503, "DUAL_PROVIDER_UNAVAILABLE", dualProviderFailureMessage(fallback.error));
+      return;
+    }
+    sendError(
+      response,
+      503,
+      "GEMINI_SETUP_REQUIRED",
+      imageInput
+        ? "Image analysis needs a working Gemini connection. The image was not sent; your chat remains saved. Reconnect Gemini and try again."
+        : geminiSetupMessage,
+    );
     return;
   }
 
@@ -771,12 +901,15 @@ async function handleAssistantChat(request, response) {
         model,
       });
       const failure = normalizeGeminiError(providerResponse, providerBody, groundingEnabled);
+      recordGeminiStatus(false, failure.code);
+      if (await settleGeminiFailure(failure, researchStreamStarted)) return;
       finishResearchError(response, failure.statusCode, failure.code, failure.message, researchStreamStarted);
       return;
     }
 
     const blockReason = providerBody?.promptFeedback?.blockReason;
     if (blockReason) {
+      recordGeminiStatus(true);
       finishResearchError(
         response,
         422,
@@ -790,15 +923,23 @@ async function handleAssistantChat(request, response) {
     const grounded = parseGeminiGrounding(providerBody);
     const answer = grounded.answer || getGeminiAnswerText(providerBody);
     if (!answer) {
+      const failure = {
+        statusCode: 502,
+        code: "EMPTY_GEMINI_RESPONSE",
+        message: "Gemini returned no answer. Please try asking in a different way.",
+      };
+      recordGeminiStatus(false, failure.code);
+      if (await settleGeminiFailure(failure, researchStreamStarted)) return;
       finishResearchError(
         response,
-        502,
-        "EMPTY_GEMINI_RESPONSE",
-        "Gemini returned no answer. Please try asking in a different way.",
+        failure.statusCode,
+        failure.code,
+        failure.message,
         researchStreamStarted,
       );
       return;
     }
+    recordGeminiStatus(true);
 
     if (grounded.searchQueryCount > 0) {
       try {
@@ -851,46 +992,72 @@ async function handleAssistantChat(request, response) {
     }
   } catch (error) {
     if (error?.name === "TimeoutError" || error?.name === "AbortError") {
+      const failure = {
+        statusCode: 504,
+        code: "TUTOR_TIMEOUT",
+        message: "Gemini did not respond before the request timed out. No answer was generated; you can retry later.",
+      };
+      recordGeminiStatus(false, failure.code);
+      if (await settleGeminiFailure(failure, researchStreamStarted)) return;
       finishResearchError(
         response,
-        504,
-        "TUTOR_TIMEOUT",
-        "Gemini did not respond before the request timed out. No answer was generated; you can retry later.",
+        failure.statusCode,
+        failure.code,
+        failure.message,
         researchStreamStarted,
       );
       return;
     }
 
     console.error("[assistant] Gemini request failed.", { name: error?.name || "Error" });
+    const failure = {
+      statusCode: 502,
+      code: "TUTOR_UNAVAILABLE",
+      message: "Gemini could not connect right now. Please try again shortly.",
+    };
+    recordGeminiStatus(false, failure.code);
+    if (await settleGeminiFailure(failure, researchStreamStarted)) return;
     finishResearchError(
       response,
-      502,
-      "TUTOR_UNAVAILABLE",
-      "Gemini could not connect right now. Please try again shortly.",
+      failure.statusCode,
+      failure.code,
+      failure.message,
       researchStreamStarted,
     );
   }
 }
 
-async function handleAssistantStatus(response) {
+async function refreshMiniMaxStatus(force = false) {
   const now = Date.now();
-  if (now - miniMaxStatusCache.checkedAt > 60_000) {
+  if (force || now - miniMaxStatusCache.checkedAt > 60_000) {
     miniMaxStatusCache.checkedAt = now;
     miniMaxStatusCache.configured = false;
+    miniMaxStatusCache.code = "";
+    miniMaxStatusCache.message = "";
     try {
       const providerResponse = await minimaxConnectors.proxy("minimax", "/v1/models", { method: "GET" });
       const providerBody = await providerResponse.json().catch(() => null);
       if (providerResponse.ok && Array.isArray(providerBody?.data)) {
         miniMaxStatusCache.configured = true;
-        miniMaxStatusCache.message = "";
       } else {
         const failure = normalizeMiniMaxChatError(providerResponse, providerBody);
+        miniMaxStatusCache.code = failure.code;
         miniMaxStatusCache.message = failure.message;
+        console.warn("[assistant] MiniMax status check failed.", {
+          httpStatus: providerResponse.status,
+          code: failure.code,
+        });
       }
     } catch {
+      miniMaxStatusCache.code = "MINIMAX_UNAVAILABLE";
       miniMaxStatusCache.message = "The MiniMax connection could not be reached. No billing settings were changed.";
     }
   }
+  return miniMaxStatusCache;
+}
+
+async function handleAssistantStatus(response) {
+  await refreshMiniMaxStatus();
   const geminiConfigured = Boolean(process.env.GEMINI_API_KEY?.trim());
   sendJson(response, 200, {
     provider: "minimax",
@@ -898,14 +1065,22 @@ async function handleAssistantStatus(response) {
     ...(!miniMaxStatusCache.configured && !geminiConfigured ? { code: "SETUP_REQUIRED" } : {}),
     minimaxConfigured: miniMaxStatusCache.configured,
     minimaxModel: miniMaxChatModel,
+    minimaxErrorCode: miniMaxStatusCache.code || null,
     geminiConfigured,
     geminiModel: geminiConfigured ? geminiModel : null,
+    geminiConnection: publicGeminiConnectionState(geminiConfigured),
+    geminiAvailable: geminiStatusCache.available,
+    geminiLastErrorCode: geminiStatusCache.code || null,
     googleSearchGrounding: "enabled-when-available",
     monthlyGroundedRequestCap: monthlyGroundingRequestCap,
     message: miniMaxStatusCache.configured
-      ? `MiniMax connection verified for ${miniMaxChatModel}. Current web research and image analysis use Gemini when configured.`
+      ? geminiStatusCache.available === false
+        ? `MiniMax connection verified for ${miniMaxChatModel}. Gemini's last request failed (${geminiStatusCache.code}); current web research and image analysis may be unavailable.`
+        : `MiniMax connection verified for ${miniMaxChatModel}. Gemini is ${publicGeminiConnectionState(geminiConfigured)}.`
       : miniMaxStatusCache.message || (geminiConfigured
-        ? "MiniMax needs attention. Gemini remains available for web research and image analysis; no fallback answer will be presented as a MiniMax response."
+        ? geminiStatusCache.available === false
+          ? `Both configured providers need attention: MiniMax (${miniMaxStatusCache.code || "unavailable"}); Gemini (${geminiStatusCache.code}).`
+          : `MiniMax needs attention. Gemini is configured but ${publicGeminiConnectionState(geminiConfigured)}.`
         : geminiSetupMessage),
   });
 }
